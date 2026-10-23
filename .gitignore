@@ -66,3 +66,8 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Local CMake/OS/editor state (shared VS Code configuration is committed)
+CMakeUserPresets.json
+.DS_Store
+*.user
