@@ -42,7 +42,12 @@ FetchContent_Declare(SDL_image
 
 FetchContent_MakeAvailable(SDL3 box2d SDL_image)
 
-add_executable(game src/main.cpp)
+add_executable(game
+    src/main.cpp
+    src/CoinManager.cpp
+    src/Camera.cpp
+    src/GroundManager.cpp
+)
 target_compile_features(game PRIVATE cxx_std_20)
 set_target_properties(game PROPERTIES CXX_EXTENSIONS OFF)
 target_link_libraries(game PRIVATE SDL3::SDL3-static box2d::box2d SDL3_image::SDL3_image)

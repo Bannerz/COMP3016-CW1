@@ -7,6 +7,9 @@
 #include <cmath>
 #include <string>
 #include "BallSprites.h"
+#include "Camera.h"
+#include "CoinManager.h"
+#include "GroundManager.h"
 #include <box2d/box2d.h>
 #include <algorithm>
 
@@ -92,6 +95,23 @@ int main(int, char*[])
         return 1;
     }
 
+    //load the coin sprite once during setup
+    const std::string coinPath =
+        std::string(basePath) + "assets/images/game-coin.png";
+
+    SDL_Texture* coinTexture = IMG_LoadTexture(renderer, coinPath.c_str());
+
+    if (!coinTexture) {
+        SDL_Log("Failed to load coin texture: %s", SDL_GetError());
+        SDL_DestroyTexture(ballTexture);
+        SDL_DestroyTexture(launcherTexture);
+        SDL_DestroyTexture(floorTexture);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+
     //draw the floor texture to the renderer
     const float tileWidth = 256.0f;
     const float tileHeight = 128.0f;
@@ -113,8 +133,8 @@ int main(int, char*[])
     float ballX = launcherX + launcherWidth * 0.5f;
     float ballY = launcherY + 35.0f;
 
-    //horizontal camera position
-    float cameraX = 0.0f;
+    //handle both camera offsets in one place
+    Camera camera;
 
     //the ball returns to this position between attempts
     const float anchorX = ballX;
@@ -126,7 +146,11 @@ int main(int, char*[])
     const float maxDragDistance = 100.0f;
 
     //each pixel of pull produces this many pixels/second of launch speed
-    const float launchPower = 8.0f;
+    const float launchPower = 80.0f;
+
+    //main owns the coin texture, while the manager handles the coin data
+    CoinManager coins(coinTexture, floorY, anchorX + 250.0f);
+    coins.startRun(anchorX, anchorY);
 
     BallState ballState = BallState::Ready;
 
@@ -138,249 +162,271 @@ int main(int, char*[])
 
     b2WorldId physicsWorld = b2CreateWorld(&worldDef);
 
-    //create a stationary floor
-    b2BodyDef groundDef = b2DefaultBodyDef();
-    groundDef.position = {0.0f, -0.5f};
+    //keep the ground manager inside this scope so it is destroyed before the world
+    {
+        GroundManager ground(physicsWorld);
 
-    b2BodyId groundBody = b2CreateBody(physicsWorld, &groundDef);
+        //create the ball with physics disabled until launched
+        b2BodyDef ballDef = b2DefaultBodyDef();
+        ballDef.type = b2_dynamicBody;
+        ballDef.position = {
+            ballX / pixelsPerMetre,
+            (floorY - ballY) / pixelsPerMetre
+        };
+        ballDef.isEnabled = false;
 
-    //floor collider is 200 metres wide and 1 metre high
-    //its top surface is at physics Y = 0
-    b2Polygon groundBox = b2MakeBox(100.0f, 0.5f);
+        //keep the sprite upright
+        ballDef.fixedRotation = true;
 
-    b2ShapeDef groundShapeDef = b2DefaultShapeDef();
-    groundShapeDef.material.friction = 0.6f;
+        b2BodyId ballBody = b2CreateBody(physicsWorld, &ballDef);
 
-    b2CreatePolygonShape(groundBody, &groundShapeDef, &groundBox);
+        b2Circle ballCircle = {};
+        ballCircle.radius = ballRadius / pixelsPerMetre;
 
-    //create the ball with physics disabled until launched
-    b2BodyDef ballDef = b2DefaultBodyDef();
-    ballDef.type = b2_dynamicBody;
-    ballDef.position = {
-        ballX / pixelsPerMetre,
-        (floorY - ballY) / pixelsPerMetre
-    };
-    ballDef.isEnabled = false;
+        b2ShapeDef ballShapeDef = b2DefaultShapeDef();
+        ballShapeDef.density = 1.0f;
+        ballShapeDef.material.friction = 0.4f;
+        ballShapeDef.material.restitution = 0.35f;
 
-    //keep the sprite upright
-    ballDef.fixedRotation = true;
+        b2CreateCircleShape(ballBody, &ballShapeDef, &ballCircle);
 
-    b2BodyId ballBody = b2CreateBody(physicsWorld, &ballDef);
+        //create the starting floor sections
+        ground.update(ballX / pixelsPerMetre);
 
-    b2Circle ballCircle = {};
-    ballCircle.radius = ballRadius / pixelsPerMetre;
+        auto moveDraggedBall = [&](float mouseX, float mouseY) {
+            //convert the mouse position into world coordinates
+            const SDL_FPoint mouseWorld = camera.screenToWorld(mouseX, mouseY);
+            float pullX = mouseWorld.x - anchorX;
+            float pullY = mouseWorld.y - anchorY;
 
-    b2ShapeDef ballShapeDef = b2DefaultShapeDef();
-    ballShapeDef.density = 1.0f;
-    ballShapeDef.material.friction = 0.4f;
-    ballShapeDef.material.restitution = 0.35f;
+            const float distance =
+                std::sqrt(pullX * pullX + pullY * pullY);
 
-    b2CreateCircleShape(ballBody, &ballShapeDef, &ballCircle);
-
-    auto moveDraggedBall = [&](float mouseX, float mouseY) {
-        //convert the mouse position into world coordinates
-        float pullX = mouseX + cameraX - anchorX;
-        float pullY = mouseY - anchorY;
-
-        const float distance =
-            std::sqrt(pullX * pullX + pullY * pullY);
-
-        //limit how far the ball can be pulled from the launcher
-        if (distance > maxDragDistance) {
-            const float scale = maxDragDistance / distance;
-            pullX *= scale;
-            pullY *= scale;
-        }
-
-        ballX = anchorX + pullX;
-        ballY = anchorY + pullY;
-    };
-
-    Uint64 previousTicks = SDL_GetTicks();
-    double accumulator = 0.0;
-
-    constexpr double physicsStep = 1.0 / 60.0;
-
-    //main loop
-    bool running = true;
-    while (running) {
-        //process all pending window, keyboard, and mouse events.
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            SDL_ConvertEventToRenderCoordinates(renderer, &event);
-
-            if (event.type == SDL_EVENT_QUIT) {
-                running = false;
+            //limit how far the ball can be pulled from the launcher
+            if (distance > maxDragDistance) {
+                const float scale = maxDragDistance / distance;
+                pullX *= scale;
+                pullY *= scale;
             }
 
-            //handle dragging, launching and resetting the ball
+            ballX = anchorX + pullX;
+            ballY = anchorY + pullY;
+        };
 
-            //start dragging only when the player clicks the ball
-            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-                event.button.button == SDL_BUTTON_LEFT &&
-                ballState == BallState::Ready) {
+        Uint64 previousTicks = SDL_GetTicks();
+        double accumulator = 0.0;
 
-                const float mouseWorldX = event.button.x + cameraX;
-                const float mouseWorldY = event.button.y;
+        constexpr double physicsStep = 1.0 / 60.0;
 
-                const float dx = mouseWorldX - ballX;
-                const float dy = mouseWorldY - ballY;
+        //main loop
+        bool running = true;
+        while (running) {
+            //process all pending window, keyboard, and mouse events.
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                SDL_ConvertEventToRenderCoordinates(renderer, &event);
 
-                if (dx * dx + dy * dy <= ballRadius * ballRadius) {
-                    ballState = BallState::Dragging;
-                    SDL_CaptureMouse(true);
+                if (event.type == SDL_EVENT_QUIT) {
+                    running = false;
                 }
+
+                //handle dragging, launching and resetting the ball
+
+                //start dragging only when the player clicks the ball
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+                    event.button.button == SDL_BUTTON_LEFT &&
+                    ballState == BallState::Ready) {
+
+                    const SDL_FPoint mouseWorld =
+                        camera.screenToWorld(event.button.x, event.button.y);
+
+                    const float dx = mouseWorld.x - ballX;
+                    const float dy = mouseWorld.y - ballY;
+
+                    if (dx * dx + dy * dy <= ballRadius * ballRadius) {
+                        ballState = BallState::Dragging;
+                        SDL_CaptureMouse(true);
+                    }
+                }
+
+                //move the ball with the mouse while dragging
+                if (event.type == SDL_EVENT_MOUSE_MOTION &&
+                    ballState == BallState::Dragging) {
+
+                    moveDraggedBall(event.motion.x, event.motion.y);
+                }
+
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_UP &&
+                    event.button.button == SDL_BUTTON_LEFT &&
+                    ballState == BallState::Dragging) {
+
+                    //use the final mouse position when released
+                    moveDraggedBall(event.button.x, event.button.y);
+
+                    SDL_CaptureMouse(false);
+
+                    //move the physics body to where the ball was dragged
+                    b2Body_SetTransform(
+                        ballBody,
+                        {
+                            ballX / pixelsPerMetre,
+                            (floorY - ballY) / pixelsPerMetre
+                        },
+                        b2Rot_identity
+                    );
+
+                    b2Body_Enable(ballBody);
+
+                    //launch in the opposite direction to the pull
+                    const b2Vec2 launchVelocity = {
+                        (anchorX - ballX) * launchPower / pixelsPerMetre,
+                        (ballY - anchorY) * launchPower / pixelsPerMetre
+                    };
+
+                    b2Body_SetLinearVelocity(ballBody, launchVelocity);
+                    b2Body_SetAwake(ballBody, true);
+
+                    ballState = BallState::Flying;
+                }
+
+                //press R to return the ball to the launcher
+                if (event.type == SDL_EVENT_KEY_DOWN &&
+                    event.key.key == SDLK_R &&
+                    !event.key.repeat) {
+
+                    b2Body_SetLinearVelocity(ballBody, {0.0f, 0.0f});
+                    b2Body_Disable(ballBody);
+
+                    ballX = anchorX;
+                    ballY = anchorY;
+                    camera.reset();
+
+                    ballState = BallState::Ready;
+                    SDL_CaptureMouse(false);
+
+                    //generate a new layout of coins for the next attempt
+                    coins.startRun(anchorX, anchorY);
+                }
+
+                //cancel dragging if the player switches away from the window
+                if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
+                    ballState == BallState::Dragging) {
+
+                    ballX = anchorX;
+                    ballY = anchorY;
+                    ballState = BallState::Ready;
+
+                    SDL_CaptureMouse(false);
+                }
+
             }
 
-            //move the ball with the mouse while dragging
-            if (event.type == SDL_EVENT_MOUSE_MOTION &&
-                ballState == BallState::Dragging) {
+            //update physics at a fixed timestep
+            const Uint64 currentTicks = SDL_GetTicks();
 
-                moveDraggedBall(event.motion.x, event.motion.y);
-            }
+            const double elapsed =
+                static_cast<double>(currentTicks - previousTicks) / 1000.0;
 
-            if (event.type == SDL_EVENT_MOUSE_BUTTON_UP &&
-                event.button.button == SDL_BUTTON_LEFT &&
-                ballState == BallState::Dragging) {
+            previousTicks = currentTicks;
 
-                //use the final mouse position when released
-                moveDraggedBall(event.button.x, event.button.y);
+            //limit the time added after a pause or breakpoint
+            accumulator += std::min(elapsed, 0.25);
 
-                SDL_CaptureMouse(false);
+            while (accumulator >= physicsStep) {
 
-                //move the physics body to where the ball was dragged
-                b2Body_SetTransform(
-                    ballBody,
-                    {
-                        ballX / pixelsPerMetre,
-                        (floorY - ballY) / pixelsPerMetre
-                    },
-                    b2Rot_identity
+                //make sure the floor exists before simulating movement
+                const b2Vec2 ballPosition = b2Body_GetPosition(ballBody);
+                ground.update(ballPosition.x);
+
+                b2World_Step(
+                    physicsWorld,
+                    static_cast<float>(physicsStep),
+                    4
                 );
 
-                b2Body_Enable(ballBody);
+                //check for collisions between the ball and coins
+                if (ballState == BallState::Flying) {
+                    const b2Vec2 physicsPosition = b2Body_GetPosition(ballBody);
 
-                //launch in the opposite direction to the pull
-                const b2Vec2 launchVelocity = {
-                    (anchorX - ballX) * launchPower / pixelsPerMetre,
-                    (ballY - anchorY) * launchPower / pixelsPerMetre
+                    const float physicsBallX = physicsPosition.x * pixelsPerMetre;
+                    const float physicsBallY = floorY - physicsPosition.y * pixelsPerMetre;
+
+                    //load nearby sections before checking for pickups
+                    coins.update(physicsBallX, physicsBallY);
+                    coins.collect(physicsBallX, physicsBallY, ballRadius);
+                }
+
+                accumulator -= physicsStep;
+            }
+
+            //use the physics position to draw the ball after launching
+            if (ballState == BallState::Flying) {
+                const b2Vec2 position = b2Body_GetPosition(ballBody);
+
+                ballX = position.x * pixelsPerMetre;
+                ballY = floorY - position.y * pixelsPerMetre;
+                camera.follow(ballX, ballY);
+            }
+
+            //clear the previous frame with a blue background
+            SDL_SetRenderDrawColor(renderer, 135, 206, 235, 255);
+            SDL_RenderClear(renderer);
+
+            //draw shapes, sprites, and text after clearing.
+
+            //keep offset within one tile
+            float offset = std::fmod(camera.getX(), tileWidth);
+
+            if (offset < 0.0f) {
+                offset += tileWidth;
+            }
+
+            //draw enough copies to cover the width
+            for (float x = -offset; x < 960.0f; x += tileWidth) {
+                SDL_FRect destination = {
+                    x,
+                    floorY - camera.getY(),
+                    tileWidth,
+                    tileHeight
                 };
 
-                b2Body_SetLinearVelocity(ballBody, launchVelocity);
-                b2Body_SetAwake(ballBody, true);
-
-                ballState = BallState::Flying;
+                SDL_RenderTexture(renderer, floorTexture, nullptr, &destination);
             }
 
-            //press R to return the ball to the launcher
-            if (event.type == SDL_EVENT_KEY_DOWN &&
-                event.key.key == SDLK_R &&
-                !event.key.repeat) {
+            //draw coins using the same camera as the rest of the world
+            coins.draw(renderer, camera);
 
-                b2Body_SetLinearVelocity(ballBody, {0.0f, 0.0f});
-                b2Body_Disable(ballBody);
-
-                ballX = anchorX;
-                ballY = anchorY;
-                cameraX = 0.0f;
-
-                ballState = BallState::Ready;
-                SDL_CaptureMouse(false);
-            }
-
-            //cancel dragging if the player switches away from the window
-            if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
-                ballState == BallState::Dragging) {
-
-                ballX = anchorX;
-                ballY = anchorY;
-                ballState = BallState::Ready;
-
-                SDL_CaptureMouse(false);
-            }
-
-        }
-
-        //update physics at a fixed timestep
-        const Uint64 currentTicks = SDL_GetTicks();
-
-        const double elapsed =
-            static_cast<double>(currentTicks - previousTicks) / 1000.0;
-
-        previousTicks = currentTicks;
-
-        //limit the time added after a pause or breakpoint
-        accumulator += std::min(elapsed, 0.25);
-
-        while (accumulator >= physicsStep) {
-            b2World_Step(
-                physicsWorld,
-                static_cast<float>(physicsStep),
-                4
-            );
-
-            accumulator -= physicsStep;
-        }
-
-        //use the physics position to draw the ball after launching
-        if (ballState == BallState::Flying) {
-            const b2Vec2 position = b2Body_GetPosition(ballBody);
-
-            ballX = position.x * pixelsPerMetre;
-            ballY = floorY - position.y * pixelsPerMetre;
-            //follow the ball once it passes 35 percent of the screen
-            const float cameraFollowX = 960.0f * 0.35f;
-            cameraX = std::max(0.0f, ballX - cameraFollowX);
-        }
-
-        //clear the previous frame with a blue background
-        SDL_SetRenderDrawColor(renderer, 135, 206, 235, 255);
-        SDL_RenderClear(renderer);
-
-        //draw shapes, sprites, and text after clearing.
-
-        //keep offset within one tile
-        float offset = std::fmod(cameraX, tileWidth);
-
-        if (offset < 0.0f) {
-            offset += tileWidth;
-        }
-
-        //draw enough copies to cover the width
-        for (float x = -offset; x < 960.0f; x += tileWidth) {
-            SDL_FRect destination = {
-                x,
-                floorY,
-                tileWidth,
-                tileHeight
+            //draw the launcher relative to the camera
+            const SDL_FPoint launcherScreen = camera.worldToScreen(launcherX, launcherY);
+            SDL_FRect launcherDestination = {
+                launcherScreen.x, launcherScreen.y, launcherWidth, launcherHeight
             };
+            SDL_RenderTexture(renderer, launcherTexture, nullptr, &launcherDestination);
 
-            SDL_RenderTexture(renderer, floorTexture, nullptr, &destination);
+            //select a ball from the sheet and keep its aspect ratio
+            //ballX and ballY are the centre of the ball
+            const SDL_FRect& ballSource = ballSprites.at(ballSpriteIndex);
+            const float ballWidth = ballHeight * ballSource.w / ballSource.h;
+            const SDL_FPoint ballScreen = camera.worldToScreen(ballX, ballY);
+            SDL_FRect ballDestination = {
+                ballScreen.x - ballWidth * 0.5f,
+                ballScreen.y - ballHeight * 0.5f,
+                ballWidth,
+                ballHeight
+            };
+            SDL_RenderTexture(renderer, ballTexture, &ballSource, &ballDestination);
+
+            //show coins collected in the current run
+            const std::string coinText = "Coins: " + std::to_string(coins.getRunCoins());
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+            SDL_RenderDebugText(renderer, 20.0f, 20.0f, coinText.c_str());
+
+            //display the completed frame in the window.
+            SDL_RenderPresent(renderer);
+
+            //pause briefly between frames
+            SDL_Delay(16);
         }
-
-        //draw the launcher relative to the camera
-        SDL_FRect launcherDestination = {
-            launcherX - cameraX, launcherY, launcherWidth, launcherHeight
-        };
-        SDL_RenderTexture(renderer, launcherTexture, nullptr, &launcherDestination);
-
-        //select a ball from the sheet and keep its aspect ratio
-        //ballX and ballY are the centre of the ball
-        const SDL_FRect& ballSource = ballSprites.at(ballSpriteIndex);
-        const float ballWidth = ballHeight * ballSource.w / ballSource.h;
-        SDL_FRect ballDestination = {
-            ballX - cameraX - ballWidth * 0.5f,
-            ballY - ballHeight * 0.5f,
-            ballWidth,
-            ballHeight
-        };
-        SDL_RenderTexture(renderer, ballTexture, &ballSource, &ballDestination);
-
-        //display the completed frame in the window.
-        SDL_RenderPresent(renderer);
-
-        //pause briefly between frames
-        SDL_Delay(16);
     }
 
     //clean up physics and textures
@@ -388,6 +434,7 @@ int main(int, char*[])
     SDL_DestroyTexture(launcherTexture);
     SDL_DestroyTexture(floorTexture);
     b2DestroyWorld(physicsWorld);
+    SDL_DestroyTexture(coinTexture);
 
     //shut down
     SDL_DestroyRenderer(renderer);

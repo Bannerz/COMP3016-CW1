@@ -1,0 +1,156 @@
+#include "CoinManager.h"
+#include "Camera.h"
+
+#include <algorithm>
+#include <cmath>
+
+CoinManager::CoinManager(SDL_Texture* texture, float floorY, float firstCoinX)
+    : texture(texture), floorY(floorY), firstCoinX(firstCoinX)
+{
+}
+
+void CoinManager::startRun(float startX, float startY)
+{
+    //start each attempt with a fresh layout and pickup history
+    const unsigned int previousSeed = runSeed;
+    do {
+        runSeed = seed();
+    } while (runSeed == previousSeed);
+
+    chunks.clear();
+    collectedCoins.clear();
+    runCoins = 0;
+    update(startX, startY);
+}
+
+void CoinManager::update(float worldX, float worldY)
+{
+    const int currentChunkX =
+        static_cast<int>(std::floor(worldX / chunkWidth));
+
+    //vertical section numbers increase upwards from the floor
+    const float heightAboveFloor = std::max(0.0f, floorY - worldY);
+    const int currentChunkY =
+        static_cast<int>(std::floor(heightAboveFloor / chunkHeight));
+
+    const int firstX = currentChunkX - 1;
+    const int lastX = currentChunkX + 1;
+    const int firstY = std::max(0, currentChunkY - 1);
+    const int lastY = currentChunkY + 1;
+
+    //create any missing sections
+    for (int chunkX = firstX; chunkX <= lastX; ++chunkX) {
+        for (int chunkY = firstY; chunkY <= lastY; ++chunkY) {
+            const ChunkId chunkId = {chunkX, chunkY};
+            if (chunks.contains(chunkId)) {
+                continue;
+            }
+
+            //reloading a section gives it the same layout during this run
+            std::seed_seq chunkSeed{
+                runSeed,
+                static_cast<unsigned int>(chunkX),
+                static_cast<unsigned int>(chunkY)
+            };
+            std::mt19937 chunkRandom(chunkSeed);
+            std::uniform_real_distribution<float> randomX(
+                48.0f, chunkWidth - 48.0f
+            );
+            std::uniform_real_distribution<float> randomHeight(
+                48.0f, chunkHeight - 48.0f
+            );
+
+            std::vector<Coin> chunkCoins;
+            for (int slot = 0; slot < coinsPerChunk; ++slot) {
+                const float x =
+                    chunkX * chunkWidth + randomX(chunkRandom);
+                const float y = floorY - (
+                    chunkY * chunkHeight + randomHeight(chunkRandom)
+                );
+
+                //leave the launcher area clear
+                if (x < firstCoinX) {
+                    continue;
+                }
+
+                const CoinId coinId = {chunkX, chunkY, slot};
+                chunkCoins.push_back({
+                    x, y, collectedCoins.contains(coinId), slot
+                });
+            }
+            chunks.emplace(chunkId, std::move(chunkCoins));
+        }
+    }
+
+    //remove sections that are no longer nearby
+    for (auto it = chunks.begin(); it != chunks.end();) {
+        const int chunkX = it->first.first;
+        const int chunkY = it->first.second;
+        if (chunkX < firstX || chunkX > lastX ||
+            chunkY < firstY || chunkY > lastY) {
+            it = chunks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+int CoinManager::collect(float ballX, float ballY, float ballRadius)
+{
+    //return how many coins were picked up during this check
+    int pickups = 0;
+    for (auto& [chunkId, chunkCoins] : chunks) {
+        for (Coin& coin : chunkCoins) {
+            if (coin.collected) {
+                continue;
+            }
+
+            const float dx = ballX - coin.x;
+            const float dy = ballY - coin.y;
+            const float pickupDistance = ballRadius + coinRadius;
+
+            if (dx * dx + dy * dy <= pickupDistance * pickupDistance) {
+                coin.collected = true;
+                ++runCoins;
+                ++pickups;
+
+                //keep this coin collected if its section is loaded again
+                collectedCoins.emplace(chunkId.first, chunkId.second, coin.slot);
+            }
+        }
+    }
+    return pickups;
+}
+
+void CoinManager::draw(SDL_Renderer* renderer, const Camera& camera) const
+{
+    //draw uncollected coins in the nearby sections
+    for (const auto& chunk : chunks) {
+        for (const Coin& coin : chunk.second) {
+            if (coin.collected) {
+                continue;
+            }
+
+            const SDL_FPoint screen = camera.worldToScreen(coin.x, coin.y);
+            if (screen.x + coinRadius < 0.0f ||
+                screen.x - coinRadius > camera.getWidth() ||
+                screen.y + coinRadius < 0.0f ||
+                screen.y - coinRadius > camera.getHeight()) {
+                continue;
+            }
+
+            SDL_FRect destination = {
+                screen.x - coinRadius,
+                screen.y - coinRadius,
+                coinSize,
+                coinSize
+            };
+            SDL_RenderTexture(renderer, texture, nullptr, &destination);
+        }
+    }
+}
+
+int CoinManager::getRunCoins() const
+{
+    return runCoins;
+}

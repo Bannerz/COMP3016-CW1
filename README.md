@@ -58,6 +58,14 @@ Install the recommended extensions, select your platform's CMake preset, and
 configure the project. Choose the matching **Game** debugger configuration and
 press **F5**.
 
+## Code structure
+
+- `main.cpp` — SDL setup, input, the game loop, and shutdown.
+- `CoinManager.h` / `.cpp` — coin chunks, pickups, drawing, and run resets.
+- `Camera.h` / `.cpp` — following the ball and converting screen/world positions.
+- `GroundManager.h` / `.cpp` — creating and removing physics floor chunks.
+- `BallSprites.h` — sprite rectangles for the ball designs.
+
 ## References
 
 - [SDL3 CMake integration](https://wiki.libsdl.org/SDL3/README-cmake)
