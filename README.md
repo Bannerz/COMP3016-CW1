@@ -60,11 +60,17 @@ press **F5**.
 
 ## Code structure
 
-- `main.cpp` — SDL setup, input, the game loop, and shutdown.
+- `main.cpp` — application entry point and error reporting.
+- `Game.h` / `.cpp` — SDL resources, level setup, input dispatch, and the game loop.
+- `LevelConfig.h` — assets, gravity, and launch settings for the current level.
+- `Ball.h` / `.cpp` — ball physics, launch state, spin, and sprite rendering.
+- `Launcher.h` / `.cpp` — launcher rendering, pull limits, and mouse controls.
 - `CoinManager.h` / `.cpp` — coin chunks, pickups, drawing, and run resets.
+- `TrampolineManager.h` / `.cpp` — floating trampolines, landing checks, and bounce rewards.
 - `Camera.h` / `.cpp` — following the ball and converting screen/world positions.
 - `GroundManager.h` / `.cpp` — creating and removing physics floor chunks.
 - `BallSprites.h` — sprite rectangles for the ball designs.
+- `Background.h` / `.cpp` — mountain/cloud parallax and altitude-based sky colours.
 
 ## References
 

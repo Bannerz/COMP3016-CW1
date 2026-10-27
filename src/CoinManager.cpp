@@ -3,10 +3,20 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
+#include <stdexcept>
 
-CoinManager::CoinManager(SDL_Texture* texture, float floorY, float firstCoinX)
-    : texture(texture), floorY(floorY), firstCoinX(firstCoinX)
+CoinManager::CoinManager(std::array<SDL_Texture*, 3> textures, float floorY, float firstCoinX,
+                         std::array<double, 3> valueWeights)
+    : textures(textures), valueWeights(valueWeights), floorY(floorY), firstCoinX(firstCoinX)
 {
+    const double total = std::accumulate(valueWeights.begin(), valueWeights.end(), 0.0);
+    if (!std::isfinite(total) || total <= 0.0 ||
+        std::any_of(valueWeights.begin(), valueWeights.end(), [](double weight) {
+            return !std::isfinite(weight) || weight < 0.0;
+        })) {
+        throw std::invalid_argument("Coin value weights must be nonnegative with a positive total");
+    }
 }
 
 void CoinManager::startRun(float startX, float startY)
@@ -53,6 +63,13 @@ void CoinManager::update(float worldX, float worldY)
                 static_cast<unsigned int>(chunkY)
             };
             std::mt19937 chunkRandom(chunkSeed);
+            //use a separate generator so adding coin values does not move the coins
+            std::seed_seq valueSeed{
+                runSeed, static_cast<unsigned int>(chunkX),
+                static_cast<unsigned int>(chunkY), 0xc01f01u
+            };
+            std::mt19937 valueRandom(valueSeed);
+            std::discrete_distribution<int> coinType(valueWeights.begin(), valueWeights.end());
             std::uniform_real_distribution<float> randomX(
                 48.0f, chunkWidth - 48.0f
             );
@@ -62,6 +79,7 @@ void CoinManager::update(float worldX, float worldY)
 
             std::vector<Coin> chunkCoins;
             for (int slot = 0; slot < coinsPerChunk; ++slot) {
+                const int value = coinType(valueRandom) + 1;
                 const float x =
                     chunkX * chunkWidth + randomX(chunkRandom);
                 const float y = floorY - (
@@ -75,7 +93,7 @@ void CoinManager::update(float worldX, float worldY)
 
                 const CoinId coinId = {chunkX, chunkY, slot};
                 chunkCoins.push_back({
-                    x, y, collectedCoins.contains(coinId), slot
+                    x, y, collectedCoins.contains(coinId), slot, value
                 });
             }
             chunks.emplace(chunkId, std::move(chunkCoins));
@@ -97,8 +115,8 @@ void CoinManager::update(float worldX, float worldY)
 
 int CoinManager::collect(float ballX, float ballY, float ballRadius)
 {
-    //return how many coins were picked up during this check
-    int pickups = 0;
+    //return the total value collected during this check
+    int awardedValue = 0;
     for (auto& [chunkId, chunkCoins] : chunks) {
         for (Coin& coin : chunkCoins) {
             if (coin.collected) {
@@ -111,15 +129,15 @@ int CoinManager::collect(float ballX, float ballY, float ballRadius)
 
             if (dx * dx + dy * dy <= pickupDistance * pickupDistance) {
                 coin.collected = true;
-                ++runCoins;
-                ++pickups;
+                runCoins += coin.value;
+                awardedValue += coin.value;
 
                 //keep this coin collected if its section is loaded again
                 collectedCoins.emplace(chunkId.first, chunkId.second, coin.slot);
             }
         }
     }
-    return pickups;
+    return awardedValue;
 }
 
 void CoinManager::draw(SDL_Renderer* renderer, const Camera& camera) const
@@ -145,6 +163,7 @@ void CoinManager::draw(SDL_Renderer* renderer, const Camera& camera) const
                 coinSize,
                 coinSize
             };
+            SDL_Texture* texture = textures.at(static_cast<std::size_t>(coin.value - 1));
             SDL_RenderTexture(renderer, texture, nullptr, &destination);
         }
     }

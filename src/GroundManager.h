@@ -6,8 +6,9 @@
 //create and remove the floor sections around the ball
 class GroundManager {
 public:
-    //main owns the world, which must outlive this manager
-    explicit GroundManager(b2WorldId world);
+    //Game owns the world, which must outlive this manager
+    explicit GroundManager(b2WorldId world, float friction = 0.9f,
+                           float rollingResistance = 0.4f);
     ~GroundManager();
 
     //only one manager should own these floor bodies
@@ -18,6 +19,8 @@ public:
 
 private:
     b2WorldId world;
+    float friction;
+    float rollingResistance;
     static constexpr float chunkWidth = 50.0f;
     std::map<int, b2BodyId> chunks;
 };

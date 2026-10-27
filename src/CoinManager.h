@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include <array>
 #include <map>
 #include <random>
 #include <set>
@@ -13,11 +14,13 @@ class Camera;
 //handle coin generation, pickups and drawing for each attempt
 class CoinManager {
 public:
-    //main owns the texture and keeps it alive while coins are being drawn
-    CoinManager(SDL_Texture* texture, float floorY, float firstCoinX);
+    //textures are ordered by value: 1, 2 and 3, and are owned by Game
+    CoinManager(std::array<SDL_Texture*, 3> textures, float floorY, float firstCoinX,
+                std::array<double, 3> valueWeights = {60.0, 28.0, 12.0});
 
     void startRun(float startX, float startY);
     void update(float ballX, float ballY);
+    //collection and the run total use coin values, not the number of objects
     int collect(float ballX, float ballY, float ballRadius);
     void draw(SDL_Renderer* renderer, const Camera& camera) const;
     int getRunCoins() const;
@@ -29,12 +32,14 @@ private:
         float y;
         bool collected = false;
         int slot = 0;
+        int value = 1;
     };
 
     using ChunkId = std::pair<int, int>;
     using CoinId = std::tuple<int, int, int>;
 
-    SDL_Texture* texture;
+    std::array<SDL_Texture*, 3> textures;
+    std::array<double, 3> valueWeights;
     float floorY;
     float firstCoinX;
 

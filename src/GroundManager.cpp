@@ -1,15 +1,20 @@
 #include "GroundManager.h"
 
 #include <cmath>
+#include <stdexcept>
 
-GroundManager::GroundManager(b2WorldId world)
-    : world(world)
+GroundManager::GroundManager(b2WorldId world, float friction, float rollingResistance)
+    : world(world), friction(friction), rollingResistance(rollingResistance)
 {
+    if (!std::isfinite(friction) || !std::isfinite(rollingResistance) ||
+        friction < 0.0f || rollingResistance < 0.0f) {
+        throw std::invalid_argument("Ground resistance must be finite and nonnegative");
+    }
 }
 
 GroundManager::~GroundManager()
 {
-    //remove owned floor bodies before main destroys the physics world
+    //remove owned floor bodies before Game destroys the physics world
     for (const auto& chunk : chunks) {
         b2DestroyBody(chunk.second);
     }
@@ -31,24 +36,36 @@ void GroundManager::update(float ballPhysicsX)
 
         b2BodyDef groundDef = b2DefaultBodyDef();
 
-        //body position is the centre of this section
+        //body position is the centre of this section at floor height
         groundDef.position = {
             (index + 0.5f) * chunkWidth,
-            -0.5f
+            0.0f
         };
 
         b2BodyId body = b2CreateBody(world, &groundDef);
 
-        //top of each section stays at physics Y = 0
-        b2Polygon groundBox = b2MakeBox(
-            chunkWidth * 0.5f,
-            0.5f
-        );
+        //the middle edge is the floor, with a ghost point beyond each end
+        //neighbouring chains share three points so the ball cannot catch a corner
+        const b2Vec2 points[] = {
+            {chunkWidth * 1.5f, 0.0f},
+            {chunkWidth * 0.5f, 0.0f},
+            {-chunkWidth * 0.5f, 0.0f},
+            {-chunkWidth * 1.5f, 0.0f}
+        };
 
-        b2ShapeDef shapeDef = b2DefaultShapeDef();
-        shapeDef.material.friction = 0.6f;
+        //points run right to left so the floor collides from above
+        b2SurfaceMaterial material = b2DefaultSurfaceMaterial();
+        //friction slows sliding, while rolling resistance slows the balls spin
+        //both only act when the ball is touching the floor
+        material.friction = friction;
+        material.rollingResistance = rollingResistance;
 
-        b2CreatePolygonShape(body, &shapeDef, &groundBox);
+        b2ChainDef chainDef = b2DefaultChainDef();
+        chainDef.points = points;
+        chainDef.count = 4;
+        chainDef.materials = &material;
+        chainDef.materialCount = 1;
+        b2CreateChain(body, &chainDef);
 
         chunks.emplace(index, body);
     }
