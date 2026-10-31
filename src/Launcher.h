@@ -15,6 +15,7 @@ public:
     void handleEvent(const SDL_Event& event, const Camera& camera, Ball& ball) const;
     void draw(SDL_Renderer* renderer, const Camera& camera) const;
     SDL_FPoint getAnchor() const;
+    void configure(SDL_Texture* sprite, float power, float pullDistance);
 
 private:
     SDL_FPoint clampPull(SDL_FPoint mousePosition) const;

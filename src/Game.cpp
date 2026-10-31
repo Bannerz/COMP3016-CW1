@@ -5,10 +5,14 @@
 #include "GroundManager.h"
 #include "Background.h"
 #include "TrampolineManager.h"
+#include "ProgressStore.h"
+#include "RewardEffects.h"
 
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 
 Game::Game() = default;
@@ -16,9 +20,14 @@ Game::Game() = default;
 Game::~Game()
 {
     //destroy level objects before their world and textures
+    rewardEffects.reset();
+    menu.reset();
     unloadLevel();
     renderer.reset();
     window.reset();
+    if (fontsReady) {
+        TTF_Quit();
+    }
     if (sdlReady) {
         SDL_Quit();
     }
@@ -30,11 +39,15 @@ void Game::initialize()
         throw std::runtime_error(std::string("SDL initialization failed: ") + SDL_GetError());
     }
     sdlReady = true;
+    if (!TTF_Init()) {
+        throw std::runtime_error("Font initialization failed: " + std::string(SDL_GetError()));
+    }
+    fontsReady = true;
 
     SDL_Window* newWindow = nullptr;
     SDL_Renderer* newRenderer = nullptr;
     const bool created = SDL_CreateWindowAndRenderer(
-        "COMP3016", windowWidth, windowHeight, SDL_WINDOW_HIGH_PIXEL_DENSITY,
+        "Protolaunch", windowWidth, windowHeight, SDL_WINDOW_HIGH_PIXEL_DENSITY,
         &newWindow, &newRenderer
     );
     window.reset(newWindow);
@@ -54,6 +67,9 @@ void Game::initialize()
         throw std::runtime_error(std::string("Failed to get base path: ") + SDL_GetError());
     }
     assetDirectory = std::string(basePath) + "assets/images/";
+    menu = std::make_unique<Menu>(renderer.get(), std::string(basePath) + "assets/");
+    rewardEffects = std::make_unique<RewardEffects>(renderer.get(), std::string(basePath) + "assets/");
+    options.vsync = SDL_SetRenderVSync(renderer.get(), 1);
 }
 
 Game::TexturePtr Game::loadTexture(const std::string& filename)
@@ -70,25 +86,37 @@ Game::TexturePtr Game::loadTexture(const std::string& filename)
     return texture;
 }
 
+void Game::createSceneTexture(bool antiAliasing)
+{
+    //draw the scene with four samples per game pixel before scaling it down
+    const int scale = antiAliasing ? 2 : 1;
+    TexturePtr replacement(SDL_CreateTexture(renderer.get(), SDL_PIXELFORMAT_RGBA8888,
+        SDL_TEXTUREACCESS_TARGET, windowWidth * scale, windowHeight * scale), SDL_DestroyTexture);
+    const bool configured = replacement &&
+        SDL_SetTextureScaleMode(replacement.get(), SDL_SCALEMODE_LINEAR) &&
+        SDL_SetTextureBlendMode(replacement.get(), SDL_BLENDMODE_NONE) &&
+        SDL_SetRenderTarget(renderer.get(), replacement.get()) &&
+        SDL_SetRenderScale(renderer.get(), static_cast<float>(scale), static_cast<float>(scale));
+    //always return to the window, including when a renderer rejects an option
+    const bool restored = SDL_SetRenderTarget(renderer.get(), nullptr);
+    if (!configured || !restored) {
+        throw std::runtime_error("Anti-aliasing setup failed: " + std::string(SDL_GetError()));
+    }
+    sceneTexture = std::move(replacement);
+}
+
 void Game::loadLevel(const LevelConfig& settings)
 {
     //level assets and objects are created here rather than in the entry point
     unloadLevel();
-    //draw the scene with four samples per game pixel before scaling it down
-    sceneTexture.reset(SDL_CreateTexture(renderer.get(), SDL_PIXELFORMAT_RGBA8888,
-        SDL_TEXTUREACCESS_TARGET, windowWidth * antiAliasingScale,
-        windowHeight * antiAliasingScale));
-    if (!sceneTexture ||
-        !SDL_SetTextureScaleMode(sceneTexture.get(), SDL_SCALEMODE_LINEAR) ||
-        !SDL_SetTextureBlendMode(sceneTexture.get(), SDL_BLENDMODE_NONE) ||
-        !SDL_SetRenderTarget(renderer.get(), sceneTexture.get()) ||
-        !SDL_SetRenderScale(renderer.get(), antiAliasingScale, antiAliasingScale) ||
-        !SDL_SetRenderTarget(renderer.get(), nullptr)) {
-        throw std::runtime_error("Anti-aliasing setup failed: " + std::string(SDL_GetError()));
-    }
+    levelSettings = settings;
+    runRewards = settings.runRewards;
+    createSceneTexture(options.antiAliasing);
     floorTexture = loadTexture(settings.floorImage);
     launcherTexture = loadTexture(settings.launcherImage);
+    loadedLauncherImage = settings.launcherImage;
     ballTexture = loadTexture(settings.ballImage);
+    premiumBallTexture = loadTexture(settings.premiumBallImage);
     for (std::size_t i = 0; i < coinTextures.size(); ++i) {
         coinTextures[i] = loadTexture(settings.coinImages[i]);
     }
@@ -161,19 +189,179 @@ void Game::unloadLevel()
     cloudTexture.reset();
     mountainTexture.reset();
     ballTexture.reset();
+    premiumBallTexture.reset();
     launcherTexture.reset();
     floorTexture.reset();
 }
 
 void Game::resetRun()
 {
+    result.reset();
+    rewardEffects->clear();
+    stoppedTime = 0.0;
+    accumulator = 0.0;
     ball->reset();
+    applyEquippedSkin();
+    //take a snapshot so purchases made while paused only affect the next attempt
+    activeUpgrades = upgrades.getEffects();
+    boostsRemaining = activeUpgrades.boostCharges;
+    ball->setGravityScale(activeUpgrades.gravityScale);
+    const std::array<std::string, 6> launcherImages = {
+        levelSettings.launcherImage, "game-launcher-level-01.png", "game-launcher-level-02.png",
+        "game-launcher-level-03.png", "game-launcher-level-04.png", "game-launcher-level-05-fixed.png"
+    };
+    const auto& sprite = launcherImages.at(static_cast<std::size_t>(upgrades.getLevel(UpgradeId::Launcher)));
+    if (sprite != loadedLauncherImage) {
+        launcherTexture = loadTexture(sprite);
+        loadedLauncherImage = sprite;
+    }
+    launcher->configure(launcherTexture.get(), levelSettings.launchPower * activeUpgrades.launchMultiplier,
+                        levelSettings.maxDragDistance + activeUpgrades.pullBonus);
+    auto coinWeights = levelSettings.coinValueWeights;
+    for (std::size_t i = 0; i < coinWeights.size(); ++i) {
+        coinWeights[i] *= activeUpgrades.coinWeightMultipliers[i];
+    }
+    coins->setValueWeights(coinWeights);
     camera.reset();
     SDL_CaptureMouse(false);
     const SDL_FPoint anchor = launcher->getAnchor();
+    runStats.reset(anchor.x);
     ground->update(anchor.x / pixelsPerMetre);
     coins->startRun(anchor.x, anchor.y);
     trampolines->startRun(anchor.x, anchor.y);
+}
+
+void Game::finishRun()
+{
+    //freeze and bank the result once, including when the player ends a run early
+    if (!hasRun || result) {
+        return;
+    }
+    result = RunResult::calculate(runStats, coins->getRunCoins(), runRewards);
+    const auto before = environments;
+    environments.recordRun(activeEnvironment, result->distance, result->height);
+    std::string unlockMessage;
+    for (std::size_t id = 1; id < EnvironmentManager::count; ++id) {
+        if (!before.isUnlocked(id) && environments.isUnlocked(id))
+            unlockMessage += std::string(EnvironmentManager::definitions[id].name) + " unlocked! ";
+    }
+    coinBank += result->payout;
+    hasRun = false;
+    screen = Screen::Results;
+    accumulator = 0.0;
+    SDL_CaptureMouse(false);
+    menuMessage = unlockMessage;
+    if (!saveProgress()) {
+        menuMessage = "Payout added, but progress and unlocks could not be saved.";
+    }
+    menu->resetInput();
+}
+
+void Game::loadProgress(bool manual)
+{
+    if (progressPath.empty()) {
+        using PathPtr = std::unique_ptr<char, decltype(&SDL_free)>;
+        PathPtr directory(SDL_GetPrefPath("Protolaunch", "Protolaunch"), SDL_free);
+        if (!directory) {
+            menuMessage = "Progress storage is unavailable.";
+            return;
+        }
+        const std::string directoryText(directory.get());
+        const std::u8string utf8Directory(directoryText.begin(), directoryText.end());
+        progressPath = std::filesystem::path(utf8Directory) / "progress.dat";
+    }
+    //a failed load leaves the current progression untouched
+    switch (ProgressStore::load(progressPath, upgrades, coinBank, skins, environments)) {
+    case ProgressStore::Load::Loaded:
+        if (manual) {
+            applyEquippedSkin();
+            menuMessage = "Progress loaded.";
+        }
+        break;
+    case ProgressStore::Load::Missing:
+        if (manual) menuMessage = "No save found. Save your progress first.";
+        break;
+    case ProgressStore::Load::Invalid:
+        menuMessage = manual ? "Could not load save. Current progress kept." :
+                               "Save could not be read; using default progression.";
+        break;
+    }
+}
+
+bool Game::saveProgress() const
+{
+    return ProgressStore::save(progressPath, upgrades, coinBank, skins, environments);
+}
+
+void Game::applyEquippedSkin()
+{
+    const auto& skin = SkinManager::catalog().at(skins.getEquipped());
+    ball->setSkin(skin.sheet == SkinSheet::Standard ? ballTexture.get() : premiumBallTexture.get(), skin.source);
+}
+
+void Game::buySkin(std::size_t id)
+{
+    const auto previousSkins = skins;
+    const auto previousBank = coinBank;
+    const auto purchase = skins.buyOrEquip(id, coinBank);
+    if (purchase == SkinManager::Purchase::NotEnoughCoins) {
+        menuMessage = "Earn more coins to unlock this skin.";
+    } else if (purchase == SkinManager::Purchase::AlreadyEquipped) {
+        menuMessage = "This skin is already equipped.";
+    } else if (purchase == SkinManager::Purchase::Invalid) {
+        menuMessage = "This skin is unavailable.";
+    } else if (!saveProgress()) {
+        skins = previousSkins;
+        coinBank = previousBank;
+        menuMessage = "Skin could not be saved; purchase cancelled.";
+    } else {
+        applyEquippedSkin();
+        menuMessage = std::string(SkinManager::catalog().at(id).name) + " equipped!";
+    }
+}
+
+void Game::buyUpgrade(UpgradeId id)
+{
+    const auto previousLevels = upgrades.getLevels();
+    const auto previousBank = coinBank;
+    const auto purchase = upgrades.buy(id, coinBank);
+    if (purchase == UpgradeManager::Purchase::NotEnoughCoins) {
+        menuMessage = "Earn more coins to buy this upgrade.";
+    } else if (purchase == UpgradeManager::Purchase::MaxLevel) {
+        menuMessage = "This upgrade is already at its maximum level.";
+    } else if (!saveProgress()) {
+        //keep coins and equipment together if the purchase cannot be saved
+        upgrades.restoreLevels(previousLevels);
+        coinBank = previousBank;
+        menuMessage = "Purchase could not be saved; coins refunded.";
+    } else {
+        menuMessage = std::string(UpgradeManager::definitions.at(static_cast<std::size_t>(id)).name) +
+                      " upgraded. Ready for your next run!";
+    }
+}
+
+void Game::selectEnvironment(std::size_t id)
+{
+    const auto previous = environments;
+    if (!environments.select(id)) {
+        menuMessage = "Reach the target in the previous environment first.";
+    } else if (!saveProgress()) {
+        environments = previous;
+        menuMessage = "Environment choice could not be saved. Try again.";
+    } else {
+        menuMessage = std::string(EnvironmentManager::definitions[id].name) + " selected for your next run.";
+    }
+}
+
+Menu::View Game::menuView() const
+{
+    if (screen == Screen::Shop) return Menu::View::Shop;
+    if (screen == Screen::Skins) return Menu::View::Skins;
+    if (screen == Screen::Results) return Menu::View::Results;
+    if (screen == Screen::Options) return Menu::View::Options;
+    if (screen == Screen::Environments) return Menu::View::Environments;
+    if (screen == Screen::Progress) return Menu::View::Progress;
+    return Menu::View::Main;
 }
 
 void Game::handleEvents()
@@ -183,19 +371,190 @@ void Game::handleEvents()
         SDL_ConvertEventToRenderCoordinates(renderer.get(), &event);
         if (event.type == SDL_EVENT_QUIT) {
             running = false;
+            continue;
+        }
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && !event.key.repeat) {
+            if (screen == Screen::Environments) {
+                screen = environmentReturnScreen;
+            } else if (screen == Screen::Shop || screen == Screen::Skins) {
+                screen = shopReturnScreen;
+            } else if (screen == Screen::Options || screen == Screen::Results || screen == Screen::Progress) {
+                screen = Screen::MainMenu;
+            } else if (screen == Screen::Playing) {
+                ball->cancelDrag();
+                SDL_CaptureMouse(false);
+                screen = Screen::MainMenu;
+            } else if (hasRun) {
+                screen = Screen::Playing;
+            }
+            accumulator = 0.0;
+            menu->resetInput();
+            menuMessage.clear();
+            continue;
+        }
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST && screen == Screen::Playing) {
+            ball->cancelDrag();
+            SDL_CaptureMouse(false);
+            screen = Screen::MainMenu;
+            accumulator = 0.0;
+            menu->resetInput();
+        }
+        //menu events never reach the ball, even when a button starts a run
+        if (screen != Screen::Playing) {
+            applyMenuAction(menu->handleEvent(event, menuView(), hasRun, options, &upgrades, coinBank, &skins, &environments));
+            continue;
         }
         if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_R && !event.key.repeat) {
-            resetRun();
+            if (ball->getState() == Ball::State::Flying) {
+                finishRun();
+            } else {
+                applyMenuAction(Menu::Action::Restart);
+            }
+            continue;
+        }
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_UP && !event.key.repeat &&
+            ball->getState() == Ball::State::Flying && boostsRemaining > 0) {
+            ball->boost(450.0f);
+            --boostsRemaining;
         }
         launcher->handleEvent(event, camera, *ball);
     }
 }
 
+void Game::applyMenuAction(Menu::Action action)
+{
+    if (action == Menu::Action::None) {
+        return;
+    }
+    menuMessage.clear();
+    switch (action) {
+    case Menu::Action::Play:
+    case Menu::Action::Restart:
+        if (!hasRun || action == Menu::Action::Restart) {
+            if (activeEnvironment != environments.getSelected()) {
+                activeEnvironment = environments.getSelected();
+                loadLevel(environments.makeLevel(activeEnvironment));
+            } else {
+                resetRun();
+            }
+        }
+        hasRun = true;
+        screen = Screen::Playing;
+        accumulator = 0.0;
+        break;
+    case Menu::Action::Options:
+        screen = Screen::Options;
+        break;
+    case Menu::Action::Environments:
+        environmentReturnScreen = screen;
+        screen = Screen::Environments;
+        menu->resetInput();
+        break;
+    case Menu::Action::Environment0:
+    case Menu::Action::Environment1:
+    case Menu::Action::Environment2:
+    case Menu::Action::Environment3:
+    case Menu::Action::Environment4:
+    case Menu::Action::Environment5:
+        selectEnvironment(static_cast<std::size_t>(action) - static_cast<std::size_t>(Menu::Action::Environment0));
+        break;
+    case Menu::Action::Progress:
+        screen = Screen::Progress;
+        menu->resetInput();
+        break;
+    case Menu::Action::SaveProgress:
+        menuMessage = saveProgress() ? "Progress saved." : "Could not save progress. Try again.";
+        break;
+    case Menu::Action::LoadProgress:
+        loadProgress(true);
+        break;
+    case Menu::Action::Shop:
+        if (screen != Screen::Skins && screen != Screen::Shop) shopReturnScreen = screen;
+        screen = Screen::Shop;
+        menu->resetInput();
+        break;
+    case Menu::Action::Skins:
+        if (screen != Screen::Shop && screen != Screen::Skins) shopReturnScreen = screen;
+        screen = Screen::Skins;
+        menu->resetInput();
+        break;
+    case Menu::Action::Skin0:
+    case Menu::Action::Skin1:
+    case Menu::Action::Skin2:
+    case Menu::Action::Skin3:
+    case Menu::Action::Skin4:
+    case Menu::Action::Skin5:
+    case Menu::Action::Skin6:
+    case Menu::Action::Skin7:
+        buySkin(menu->getSkinId(action));
+        break;
+    case Menu::Action::StandardSkins:
+    case Menu::Action::PremiumSkins:
+    case Menu::Action::PreviousSkins:
+    case Menu::Action::NextSkins:
+        break;
+    case Menu::Action::BuyLauncher: buyUpgrade(UpgradeId::Launcher); break;
+    case Menu::Action::BuyBands: buyUpgrade(UpgradeId::Bands); break;
+    case Menu::Action::BuyMagnet: buyUpgrade(UpgradeId::Magnet); break;
+    case Menu::Action::BuyLoot: buyUpgrade(UpgradeId::LuckyLoot); break;
+    case Menu::Action::BuyGlider: buyUpgrade(UpgradeId::Glider); break;
+    case Menu::Action::BuyAirBoost: buyUpgrade(UpgradeId::AirBoost); break;
+    case Menu::Action::EndRun:
+        finishRun();
+        break;
+    case Menu::Action::MainMenu:
+        screen = Screen::MainMenu;
+        break;
+    case Menu::Action::Back:
+        screen = screen == Screen::Environments ? environmentReturnScreen :
+            (screen == Screen::Shop || screen == Screen::Skins ? shopReturnScreen : Screen::MainMenu);
+        break;
+    case Menu::Action::Quit:
+        running = false;
+        break;
+    case Menu::Action::Fullscreen:
+        if (SDL_SetWindowFullscreen(window.get(), !options.fullscreen)) {
+            options.fullscreen = !options.fullscreen;
+        } else {
+            menuMessage = "Fullscreen is unavailable on this display.";
+        }
+        break;
+    case Menu::Action::VSync:
+        if (SDL_SetRenderVSync(renderer.get(), options.vsync ? 0 : 1)) {
+            options.vsync = !options.vsync;
+        } else {
+            menuMessage = "VSync is unavailable with this renderer.";
+        }
+        break;
+    case Menu::Action::AntiAliasing:
+        try {
+            createSceneTexture(!options.antiAliasing);
+            options.antiAliasing = !options.antiAliasing;
+        } catch (const std::runtime_error&) {
+            menuMessage = "This graphics setting could not be applied.";
+        }
+        break;
+    case Menu::Action::None:
+        break;
+    }
+    //keep selection on toggles so keyboard users can change them repeatedly
+    if (action == Menu::Action::Play || action == Menu::Action::Restart ||
+        action == Menu::Action::Options || action == Menu::Action::Back ||
+        action == Menu::Action::MainMenu) {
+        menu->resetInput();
+    }
+}
+
 void Game::update(double elapsed)
 {
+    if (screen != Screen::Playing) {
+        accumulator = 0.0;
+        return;
+    }
     //limit catch up after a pause and keep physics at 60 steps per second
     accumulator += std::min(elapsed, 0.25);
     while (accumulator >= physicsStep) {
+        rewardEffects->update(static_cast<float>(physicsStep));
         trampolines->animate(static_cast<float>(physicsStep));
         const SDL_FPoint previous = ball->getPosition();
         ground->update(ball->getPhysicsPosition().x);
@@ -208,10 +567,27 @@ void Game::update(double elapsed)
             trampolines->update(current.x, current.y);
             if (const auto landing = trampolines->land(previous, current, ball->getRadius())) {
                 ball->bounce(landing->position, landing->upwardSpeed);
+                coins->addCoins(landing->reward);
+                rewardEffects->add(camera.worldToScreen(landing->position.x, landing->position.y),
+                                   landing->reward, RewardEffects::Kind::Trampoline);
             }
             const SDL_FPoint position = ball->getPosition();
+            runStats.update(position, floorY, ball->getRadius(), physicsStep);
             coins->update(position.x, position.y);
-            coins->collect(position.x, position.y, ball->getRadius());
+            coins->collect(position.x, position.y, ball->getRadius(), activeUpgrades.magnetRange);
+            for (const auto& pickup : coins->getPickups()) {
+                rewardEffects->add(camera.worldToScreen(pickup.position.x, pickup.position.y),
+                                   pickup.value, RewardEffects::Kind::Coin);
+            }
+            //require a short, continuous rest so ordinary landings do not end the run
+            const b2Vec2 velocity = ball->getPhysicsVelocity();
+            const bool onGround = position.y + ball->getRadius() >= floorY - 2.0f;
+            const bool stopped = std::abs(velocity.x) < 0.15f && std::abs(velocity.y) < 0.15f;
+            stoppedTime = onGround && stopped ? stoppedTime + physicsStep : 0.0;
+            if (stoppedTime >= 0.75) {
+                finishRun();
+                break;
+            }
         }
         accumulator -= physicsStep;
     }
@@ -241,6 +617,8 @@ void Game::draw() const
         SDL_RenderTexture(renderer.get(), floorTexture.get(), nullptr, &destination);
     }
 
+    coins->drawPickupRange(renderer.get(), camera, ball->getPosition(), ball->getRadius(),
+                           activeUpgrades.magnetRange);
     coins->draw(renderer.get(), camera);
     trampolines->draw(renderer.get(), camera);
     launcher->draw(renderer.get(), camera);
@@ -256,6 +634,13 @@ void Game::draw() const
         throw std::runtime_error("Scene presentation failed: " + std::string(SDL_GetError()));
     }
 
+    rewardEffects->draw();
+    if (screen != Screen::Playing) {
+        menu->draw(menuView(), hasRun, options, menuMessage, result ? &*result : nullptr, coinBank, &upgrades, &skins, &environments);
+        SDL_RenderPresent(renderer.get());
+        return;
+    }
+
     //the plain gold coin represents the total value in the interface
     const SDL_FRect coinIcon = {16.0f, 14.0f, 32.0f, 32.0f};
     SDL_RenderTexture(renderer.get(), coinIconTexture.get(), nullptr, &coinIcon);
@@ -265,19 +650,50 @@ void Game::draw() const
     SDL_RenderDebugText(renderer.get(), 57.0f, 27.0f, coinText.c_str());
     SDL_SetRenderDrawColor(renderer.get(), 255, 255, 255, 255);
     SDL_RenderDebugText(renderer.get(), 56.0f, 26.0f, coinText.c_str());
-    const std::string scoreText = "Score: " +
-        std::to_string(coins->getRunCoins() + trampolines->getRunScore());
+    const std::string bankText = "Bank: " + std::to_string(coinBank);
     SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255);
-    SDL_RenderDebugText(renderer.get(), 17.0f, 55.0f, scoreText.c_str());
+    SDL_RenderDebugText(renderer.get(), 17.0f, 55.0f, bankText.c_str());
     SDL_SetRenderDrawColor(renderer.get(), 255, 255, 255, 255);
-    SDL_RenderDebugText(renderer.get(), 16.0f, 54.0f, scoreText.c_str());
+    SDL_RenderDebugText(renderer.get(), 16.0f, 54.0f, bankText.c_str());
+    const std::string boostText = "Boosts: " + std::to_string(boostsRemaining) + " [Up]";
+    SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255);
+    SDL_RenderDebugText(renderer.get(), 17.0f, 79.0f, boostText.c_str());
+    SDL_SetRenderDrawColor(renderer.get(), 255, 255, 255, 255);
+    SDL_RenderDebugText(renderer.get(), 16.0f, 78.0f, boostText.c_str());
+    const std::string areaText = std::string(EnvironmentManager::definitions[activeEnvironment].name);
+    SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255);
+    SDL_RenderDebugText(renderer.get(), 17.0f, 103.0f, areaText.c_str());
+    SDL_SetRenderDrawColor(renderer.get(), 255, 255, 255, 255);
+    SDL_RenderDebugText(renderer.get(), 16.0f, 102.0f, areaText.c_str());
+
+    //keep the run measurements fixed on screen as the camera follows the ball
+    const SDL_FRect statsPanel{windowWidth - 240.0f, 14.0f, 224.0f, 112.0f};
+    SDL_SetRenderDrawBlendMode(renderer.get(), SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer.get(), 15, 30, 45, 175);
+    SDL_RenderFillRect(renderer.get(), &statsPanel);
+    SDL_SetRenderDrawBlendMode(renderer.get(), SDL_BLENDMODE_NONE);
+    const auto statLine = [&](const char* label, double value, float y, const char* unit = " m") {
+        std::ostringstream text;
+        text << label << std::fixed << std::setprecision(1) << value << unit;
+        const std::string line = text.str();
+        SDL_SetRenderDrawColor(renderer.get(), 0, 0, 0, 255);
+        SDL_RenderDebugText(renderer.get(), statsPanel.x + 13, y + 1, line.c_str());
+        SDL_SetRenderDrawColor(renderer.get(), 255, 255, 255, 255);
+        SDL_RenderDebugText(renderer.get(), statsPanel.x + 12, y, line.c_str());
+    };
+    statLine("Distance: ", runStats.getDistance(), 30);
+    statLine("Height: ", runStats.getHeight(), 54);
+    statLine("Max height: ", runStats.getBestHeight(), 78);
+    statLine("Run time: ", runStats.getDuration(), 102, " s");
     SDL_RenderPresent(renderer.get());
 }
 
 int Game::run()
 {
     initialize();
-    loadLevel(LevelConfig{});
+    loadProgress();
+    activeEnvironment = environments.getSelected();
+    loadLevel(environments.makeLevel(activeEnvironment));
 
     Uint64 previousTicks = SDL_GetTicks();
     running = true;
@@ -289,7 +705,8 @@ int Game::run()
 
         update(elapsed);
         draw();
-        SDL_Delay(16);
+        //vsync already waits for the display, so avoid waiting a second frame
+        SDL_Delay(options.vsync ? 1 : 16);
     }
     return 0;
 }

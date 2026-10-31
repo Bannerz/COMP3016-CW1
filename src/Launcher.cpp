@@ -16,6 +16,14 @@ SDL_FPoint Launcher::getAnchor() const
     return {position.x + anchorOffset.x, position.y + anchorOffset.y};
 }
 
+void Launcher::configure(SDL_Texture* sprite, float power, float pullDistance)
+{
+    //apply purchased equipment before a new attempt starts
+    texture = sprite;
+    launchPower = power;
+    maxDragDistance = pullDistance;
+}
+
 SDL_FPoint Launcher::clampPull(SDL_FPoint mousePosition) const
 {
     const SDL_FPoint anchor = getAnchor();

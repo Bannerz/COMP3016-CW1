@@ -4,7 +4,7 @@
 #include <array>
 
 // Source rectangles for ball-sprite-sheet.png, in original image pixels.
-// IDs run left to right, then top to bottom. Upgrade code can select IDs 0-39.
+// IDs run left to right, then top to bottom. Standard skins use IDs 0-39.
 // The artwork has uneven margins, so each ball has its own rectangle.
 inline constexpr std::array<SDL_FRect, 40> ballSprites = {{
     // Row 1: IDs 0-7 (0 is the cream starter ball).

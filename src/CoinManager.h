@@ -14,6 +14,8 @@ class Camera;
 //handle coin generation, pickups and drawing for each attempt
 class CoinManager {
 public:
+    struct Pickup { SDL_FPoint position; int value; };
+
     //textures are ordered by value: 1, 2 and 3, and are owned by Game
     CoinManager(std::array<SDL_Texture*, 3> textures, float floorY, float firstCoinX,
                 std::array<double, 3> valueWeights = {60.0, 28.0, 12.0});
@@ -21,7 +23,13 @@ public:
     void startRun(float startX, float startY);
     void update(float ballX, float ballY);
     //collection and the run total use coin values, not the number of objects
-    int collect(float ballX, float ballY, float ballRadius);
+    int collect(float ballX, float ballY, float ballRadius, float extraReach = 0.0f);
+    //events describe only the most recent collection check
+    const std::vector<Pickup>& getPickups() const;
+    void drawPickupRange(SDL_Renderer* renderer, const Camera& camera,
+                         SDL_FPoint ballPosition, float ballRadius, float extraReach) const;
+    void addCoins(int value);
+    void setValueWeights(std::array<double, 3> weights);
     void draw(SDL_Renderer* renderer, const Camera& camera) const;
     int getRunCoins() const;
 
@@ -54,4 +62,5 @@ private:
     std::random_device seed;
     unsigned int runSeed = 0;
     int runCoins = 0;
+    std::vector<Pickup> pickups;
 };

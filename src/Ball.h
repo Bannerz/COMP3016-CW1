@@ -24,14 +24,18 @@ public:
     void cancelDrag();
     void launch(SDL_FPoint velocityPixelsPerSecond);
     void bounce(SDL_FPoint landingPosition, float upwardSpeed);
+    void setGravityScale(float scale);
+    void boost(float upwardVelocity);
     void reset();
     void updateFromPhysics();
     void draw(SDL_Renderer* renderer, const Camera& camera) const;
     void setSpriteIndex(std::size_t index);
+    void setSkin(SDL_Texture* sheet, SDL_FRect source);
 
     State getState() const;
     SDL_FPoint getPosition() const;
     b2Vec2 getPhysicsPosition() const;
+    b2Vec2 getPhysicsVelocity() const;
     float getRadius() const;
 
 private:
@@ -45,5 +49,6 @@ private:
     float pixelsPerMetre;
     float height;
     std::size_t spriteIndex = 0;
+    SDL_FRect spriteSource{};
     State state = State::Ready;
 };

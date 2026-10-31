@@ -4,19 +4,26 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <numbers>
 #include <stdexcept>
 
 CoinManager::CoinManager(std::array<SDL_Texture*, 3> textures, float floorY, float firstCoinX,
                          std::array<double, 3> valueWeights)
     : textures(textures), valueWeights(valueWeights), floorY(floorY), firstCoinX(firstCoinX)
 {
-    const double total = std::accumulate(valueWeights.begin(), valueWeights.end(), 0.0);
+    setValueWeights(valueWeights);
+}
+
+void CoinManager::setValueWeights(std::array<double, 3> weights)
+{
+    const double total = std::accumulate(weights.begin(), weights.end(), 0.0);
     if (!std::isfinite(total) || total <= 0.0 ||
-        std::any_of(valueWeights.begin(), valueWeights.end(), [](double weight) {
+        std::any_of(weights.begin(), weights.end(), [](double weight) {
             return !std::isfinite(weight) || weight < 0.0;
         })) {
         throw std::invalid_argument("Coin value weights must be nonnegative with a positive total");
     }
+    valueWeights = weights;
 }
 
 void CoinManager::startRun(float startX, float startY)
@@ -30,6 +37,7 @@ void CoinManager::startRun(float startX, float startY)
     chunks.clear();
     collectedCoins.clear();
     runCoins = 0;
+    pickups.clear();
     update(startX, startY);
 }
 
@@ -113,10 +121,11 @@ void CoinManager::update(float worldX, float worldY)
     }
 }
 
-int CoinManager::collect(float ballX, float ballY, float ballRadius)
+int CoinManager::collect(float ballX, float ballY, float ballRadius, float extraReach)
 {
     //return the total value collected during this check
     int awardedValue = 0;
+    pickups.clear();
     for (auto& [chunkId, chunkCoins] : chunks) {
         for (Coin& coin : chunkCoins) {
             if (coin.collected) {
@@ -125,12 +134,13 @@ int CoinManager::collect(float ballX, float ballY, float ballRadius)
 
             const float dx = ballX - coin.x;
             const float dy = ballY - coin.y;
-            const float pickupDistance = ballRadius + coinRadius;
+            const float pickupDistance = ballRadius + coinRadius + std::max(0.0f, extraReach);
 
             if (dx * dx + dy * dy <= pickupDistance * pickupDistance) {
                 coin.collected = true;
                 runCoins += coin.value;
                 awardedValue += coin.value;
+                pickups.push_back({{coin.x, coin.y}, coin.value});
 
                 //keep this coin collected if its section is loaded again
                 collectedCoins.emplace(chunkId.first, chunkId.second, coin.slot);
@@ -138,6 +148,36 @@ int CoinManager::collect(float ballX, float ballY, float ballRadius)
         }
     }
     return awardedValue;
+}
+
+const std::vector<CoinManager::Pickup>& CoinManager::getPickups() const
+{
+    return pickups;
+}
+
+void CoinManager::drawPickupRange(SDL_Renderer* renderer, const Camera& camera,
+                                  SDL_FPoint ballPosition, float ballRadius, float extraReach) const
+{
+    if (extraReach <= 0) return;
+    const SDL_FPoint centre = camera.worldToScreen(ballPosition.x, ballPosition.y);
+    //the ring marks the catchers edge; a coins edge touching it counts as a pickup
+    const float radius = ballRadius + extraReach;
+    constexpr std::size_t segments = 96;
+    std::array<SDL_FPoint, segments + 1> points{};
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    for (int pass = 0; pass < 5; ++pass) {
+        const float edge = radius + static_cast<float>(pass - 2);
+        for (std::size_t i = 0; i < segments; ++i) {
+            const float angle = static_cast<float>(i) * 2.0f * std::numbers::pi_v<float> / segments;
+            points[i] = {centre.x + std::cos(angle) * edge, centre.y + std::sin(angle) * edge};
+        }
+        points[segments] = points[0];
+        //a dark rim keeps the gold outline visible against pale skies and bright assets
+        if (pass > 0 && pass < 4) SDL_SetRenderDrawColor(renderer, 255, 222, 76, 210);
+        else SDL_SetRenderDrawColor(renderer, 57, 40, 29, 145);
+        SDL_RenderLines(renderer, points.data(), static_cast<int>(points.size()));
+    }
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
 void CoinManager::draw(SDL_Renderer* renderer, const Camera& camera) const
@@ -172,4 +212,10 @@ void CoinManager::draw(SDL_Renderer* renderer, const Camera& camera) const
 int CoinManager::getRunCoins() const
 {
     return runCoins;
+}
+
+void CoinManager::addCoins(int value)
+{
+    //trampoline rewards use the same run balance as collected coins
+    runCoins += std::max(0, value);
 }

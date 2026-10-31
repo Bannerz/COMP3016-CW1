@@ -49,7 +49,6 @@ void TrampolineManager::startRun(float x, float y, std::optional<unsigned int> s
     }
     chunks.clear();
     rewarded.clear();
-    runScore = 0;
     update(x, y);
 }
 
@@ -125,7 +124,6 @@ std::optional<TrampolineManager::Landing> TrampolineManager::land(
     platform.bounceTime = 0.0f;
     const int reward = rewarded.insert(selected->first).second ?
                        settings.tiers[platform.tier].reward : 0;
-    runScore += reward;
     return Landing{{landingX, platform.surfaceY - radius}, settings.bounceSpeed, reward};
 }
 
@@ -161,8 +159,6 @@ void TrampolineManager::draw(SDL_Renderer* renderer, const Camera& camera) const
         }
     }
 }
-
-int TrampolineManager::getRunScore() const { return runScore; }
 
 std::vector<TrampolineManager::Trampoline> TrampolineManager::getTrampolines() const
 {

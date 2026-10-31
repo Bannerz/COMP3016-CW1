@@ -3,6 +3,7 @@
 #include "Camera.h"
 
 #include <algorithm>
+#include <cmath>
 #include <numbers>
 #include <stdexcept>
 
@@ -120,6 +121,22 @@ void Ball::reset()
     state = State::Ready;
 }
 
+void Ball::setGravityScale(float scale)
+{
+    b2Body_SetGravityScale(body, scale);
+}
+
+void Ball::boost(float upwardVelocity)
+{
+    if (state != State::Flying) {
+        return;
+    }
+    //an air boost adds upward motion without removing sideways speed or spin
+    const b2Vec2 velocity = b2Body_GetLinearVelocity(body);
+    b2Body_SetLinearVelocity(body, {velocity.x, velocity.y + upwardVelocity / pixelsPerMetre});
+    b2Body_SetAwake(body, true);
+}
+
 void Ball::updateFromPhysics()
 {
     if (state == State::Flying) {
@@ -131,7 +148,7 @@ void Ball::updateFromPhysics()
 
 void Ball::draw(SDL_Renderer* renderer, const Camera& camera) const
 {
-    const SDL_FRect& source = ballSprites.at(spriteIndex);
+    const SDL_FRect& source = spriteSource;
     const float width = height * source.w / source.h;
     const SDL_FPoint screen = camera.worldToScreen(position.x, position.y);
     SDL_FRect destination = {screen.x - width * 0.5f, screen.y - height * 0.5f, width, height};
@@ -148,9 +165,23 @@ void Ball::setSpriteIndex(std::size_t index)
         throw std::out_of_range("Ball sprite index must be between 0 and 39");
     }
     spriteIndex = index;
+    spriteSource = ballSprites[index];
+}
+
+void Ball::setSkin(SDL_Texture* sheet, SDL_FRect source)
+{
+    if (!sheet || !std::isfinite(source.x) || !std::isfinite(source.y) ||
+        !std::isfinite(source.w) || !std::isfinite(source.h) || source.x < 0 || source.y < 0 ||
+        source.w <= 0 || source.h <= 0 || source.x + source.w > sheet->w || source.y + source.h > sheet->h) {
+        throw std::invalid_argument("Skin rectangle must be inside its sprite sheet");
+    }
+    //changing cosmetics leaves the physics body, motion and spin alone
+    texture = sheet;
+    spriteSource = source;
 }
 
 Ball::State Ball::getState() const { return state; }
 SDL_FPoint Ball::getPosition() const { return position; }
 b2Vec2 Ball::getPhysicsPosition() const { return b2Body_GetPosition(body); }
+b2Vec2 Ball::getPhysicsVelocity() const { return b2Body_GetLinearVelocity(body); }
 float Ball::getRadius() const { return height * 0.5f; }
