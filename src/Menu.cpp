@@ -7,6 +7,12 @@
 #include <stdexcept>
 
 namespace {
+//Shared card positions keep drawing and hit areas aligned, including their focus gutter.
+constexpr float gridTop = 152.0f;
+constexpr float gridRowSpacing = 124.0f;
+constexpr float skinTop = 184.0f;
+constexpr float skinRowSpacing = 160.0f;
+constexpr float footerY = 622.0f;
 //A quick overshoot followed by a gentle settle, with an exact resting value.
 float popProgress(double elapsed, double duration)
 {
@@ -55,7 +61,7 @@ Menu::Menu(SDL_Renderer* renderer, const std::string& assetRoot) : renderer(rend
         SDL_SetTextureScaleMode(icon.get(), SDL_SCALEMODE_LINEAR);
         upgradeIcons.push_back(std::move(icon));
     }
-    for (int size : {18, 24, 30, 58}) {
+    for (int size : {18, 24, 30, 48, 58}) {
         const std::string filename = size >= 30 ? "Lilita_One/LilitaOne-Regular.ttf" :
                                                 "Fredoka/static/Fredoka-Medium.ttf";
         //render text at double resolution so it stays smooth on high density screens
@@ -110,14 +116,14 @@ std::vector<Menu::Button> Menu::getButtons(View view, bool hasRun,
                 const bool unlocked = environments->isUnlocked(id);
                 const bool chosen = environments->getSelected() == id;
                 const float x = id % 2 == 0 ? 90.0f : 490.0f;
-                const float y = 136.0f + static_cast<float>(id / 2) * 138.0f;
-                buttons.push_back({{x + 238, y + 12, 130, 40},
+                const float y = gridTop + static_cast<float>(id / 2) * gridRowSpacing;
+                buttons.push_back({{x + 258, y + 12, 110, 36},
                     chosen ? "Selected" : (unlocked ? "Select" : "Locked"),
                     static_cast<Action>(static_cast<int>(Action::Environment0) + static_cast<int>(id)),
                     unlocked && !chosen, unlocked && !chosen});
             }
         }
-        buttons.push_back({{370, 562, 220, 40}, "Back", Action::Back, true});
+        buttons.push_back({{370, 532, 220, 40}, "Back", Action::Back, true});
         return buttons;
     }
     if (view == View::Skins) {
@@ -130,19 +136,19 @@ std::vector<Menu::Button> Menu::getButtons(View view, bool hasRun,
                 const auto cost = SkinManager::catalog().at(id).price;
                 const bool enabled = !equipped && (owned || coinBank >= cost);
                 const float x = 100.0f + static_cast<float>(slot % 4) * 194.0f;
-                const float y = slot < 4 ? 194.0f : 366.0f;
+                const float y = skinTop + (slot < 4 ? 0.0f : skinRowSpacing);
                 const auto action = static_cast<Action>(static_cast<int>(Action::Skin0) + static_cast<int>(slot));
-                buttons.push_back({{x + 18, y + 112, 144, 34},
+                buttons.push_back({{x + 42, y + 100, 124, 32},
                     equipped ? "Equipped" : (owned ? "Equip" : std::to_string(cost) + " coins"),
                     action, enabled, enabled});
             }
         }
-        buttons.push_back({{100, 548, 130, 48}, "Previous", Action::PreviousSkins, false, skinPage > 0});
-        buttons.push_back({{730, 548, 130, 48}, "Next", Action::NextSkins, false, skinPage + 1 < skinPageCount()});
-        buttons.push_back({{390, 548, 180, 48}, "Back", Action::Back, true});
+        buttons.push_back({{120, 530, 140, 40}, "Previous", Action::PreviousSkins, false, skinPage > 0});
+        buttons.push_back({{720, 530, 140, 40}, "Next", Action::NextSkins, false, skinPage + 1 < skinPageCount()});
+        buttons.push_back({{390, 530, 180, 40}, "Back", Action::Back, true});
         buttons.push_back({{690, 92, 170, 40}, "Upgrades", Action::Shop, false});
-        buttons.push_back({{245, 140, 210, 38}, "Standard", Action::StandardSkins, !premiumSkins});
-        buttons.push_back({{465, 140, 250, 38}, "Ultra premium", Action::PremiumSkins, premiumSkins});
+        buttons.push_back({{245, 136, 210, 36}, "Standard", Action::StandardSkins, !premiumSkins});
+        buttons.push_back({{495, 136, 250, 36}, "Ultra premium", Action::PremiumSkins, premiumSkins});
         return buttons;
     }
     if (view == View::Shop) {
@@ -155,59 +161,70 @@ std::vector<Menu::Button> Menu::getButtons(View view, bool hasRun,
             for (std::size_t i = 0; i < UpgradeManager::count; ++i) {
                 const auto id = static_cast<UpgradeId>(i);
                 const float x = i % 2 == 0 ? 90.0f : 490.0f;
-                const float y = 150.0f + static_cast<float>(i / 2) * 124.0f;
+                const float y = gridTop + static_cast<float>(i / 2) * gridRowSpacing;
                 const auto cost = upgrades->getCost(id);
                 const bool affordable = upgrades->canBuy(id, coinBank);
-                buttons.push_back({{x + 240, y + 20, 128, 44},
+                buttons.push_back({{x + 258, y + 20, 110, 40},
                     cost > 0 ? std::to_string(cost) + " coins" : "MAX",
                     actions[i], affordable, affordable});
             }
         }
-        buttons.push_back({{370, 540, 220, 56}, "Back", Action::Back, true});
+        buttons.push_back({{370, 532, 220, 40}, "Back", Action::Back, true});
         buttons.push_back({{620, 102, 230, 40}, "Skin shop", Action::Skins, false});
         return buttons;
     }
     if (view == View::Results) {
         return {
-            {{203, 492, 174, 54}, "Play again", Action::Restart, true},
-            {{389, 492, 174, 54}, "Shop", Action::Shop, false},
-            {{575, 492, 174, 54}, "Environments", Action::Environments, false},
-            {{370, 552, 220, 40}, "Main menu", Action::MainMenu, false}
+            {{240, 478, 220, 40}, "Play again", Action::Restart, true},
+            {{520, 478, 220, 40}, "Shop", Action::Shop, false},
+            {{240, 534, 220, 40}, "Environments", Action::Environments, false},
+            {{520, 534, 220, 40}, "Main menu", Action::MainMenu, false}
         };
     }
     if (view == View::Progress) {
         return {
-            {{295, 260, 370, 64}, "Save progress", Action::SaveProgress, true},
-            {{295, 348, 370, 64}, "Load progress", Action::LoadProgress, false},
-            {{340, 480, 280, 64}, "Back", Action::Back, false}
+            {{295, 244, 370, 52}, "Save as...", Action::SaveProgress, true},
+            {{295, 310, 370, 52}, "Load file...", Action::LoadProgress, false},
+            {{295, 376, 370, 52}, "Fresh game", Action::FreshGame, false},
+            {{340, 494, 280, 48}, "Back", Action::Back, false}
+        };
+    }
+    if (view == View::FreshGame) {
+        return {
+            {{295, 336, 370, 56}, "Start fresh", Action::ConfirmFreshGame, true},
+            {{340, 420, 280, 56}, "Cancel", Action::Back, false}
         };
     }
     if (view == View::Options) {
         return {
-            {{295, 218, 370, 64}, std::string("Fullscreen: ") + (options.fullscreen ? "On" : "Off"), Action::Fullscreen, false},
-            {{295, 300, 370, 64}, std::string("VSync: ") + (options.vsync ? "On" : "Off"), Action::VSync, false},
-            {{295, 382, 370, 64}, std::string("Anti-aliasing: ") + (options.antiAliasing ? "On" : "Off"), Action::AntiAliasing, false},
-            {{340, 480, 280, 64}, "Back", Action::Back, true}
+            {{295, 170, 370, 48}, std::string("Fullscreen: ") + (options.fullscreen ? "On" : "Off"), Action::Fullscreen, false},
+            {{295, 228, 370, 48}, std::string("VSync: ") + (options.vsync ? "On" : "Off"), Action::VSync, false},
+            {{295, 286, 370, 48}, std::string("Anti-aliasing: ") + (options.antiAliasing ? "On" : "Off"), Action::AntiAliasing, false},
+            {{295, 350, 62, 44}, "-", Action::MusicDown, false, options.musicVolume > 0},
+            {{603, 350, 62, 44}, "+", Action::MusicUp, false, options.musicVolume < 100},
+            {{295, 414, 62, 44}, "-", Action::EffectsDown, false, options.effectsVolume > 0},
+            {{603, 414, 62, 44}, "+", Action::EffectsUp, false, options.effectsVolume < 100},
+            {{340, 506, 280, 54}, "Back", Action::Back, true}
         };
     }
     if (hasRun) {
         return {
-            {{320, 174, 320, 44}, "Resume", Action::Play, true},
-            {{320, 226, 320, 44}, "Shop", Action::Shop, false},
-            {{320, 278, 320, 44}, "End run", Action::EndRun, false},
-            {{320, 330, 320, 44}, "Environments", Action::Environments, false},
-            {{320, 382, 320, 44}, "Save / Load", Action::Progress, false},
-            {{320, 434, 320, 44}, "Options", Action::Options, false},
-            {{320, 486, 320, 44}, "Quit", Action::Quit, false}
+            {{320, 158, 320, 40}, "Resume", Action::Play, true},
+            {{320, 208, 320, 40}, "Shop", Action::Shop, false},
+            {{320, 258, 320, 40}, "End run", Action::EndRun, false},
+            {{320, 308, 320, 40}, "Environments", Action::Environments, false},
+            {{320, 358, 320, 40}, "Save / Load", Action::Progress, false},
+            {{320, 408, 320, 40}, "Options", Action::Options, false},
+            {{320, 458, 320, 40}, "Quit", Action::Quit, false}
         };
     }
     return {
-        {{320, 190, 320, 48}, "Play", Action::Play, true},
-        {{320, 248, 320, 48}, "Shop", Action::Shop, false},
-        {{320, 306, 320, 48}, "Environments", Action::Environments, false},
-        {{320, 364, 320, 48}, "Save / Load", Action::Progress, false},
-        {{320, 422, 320, 48}, "Options", Action::Options, false},
-        {{320, 480, 320, 48}, "Quit", Action::Quit, false}
+        {{320, 158, 320, 48}, "Play", Action::Play, true},
+        {{320, 214, 320, 48}, "Shop", Action::Shop, false},
+        {{320, 270, 320, 48}, "Environments", Action::Environments, false},
+        {{320, 326, 320, 48}, "Save / Load", Action::Progress, false},
+        {{320, 382, 320, 48}, "Options", Action::Options, false},
+        {{320, 438, 320, 48}, "Quit", Action::Quit, false}
     };
 }
 
@@ -215,7 +232,9 @@ Menu::Action Menu::handleEvent(const SDL_Event& event, View view, bool hasRun,
                                const MenuOptions& options, const UpgradeManager* upgrades,
                                std::int64_t coinBank, const SkinManager* skins, const EnvironmentManager* environments)
 {
+    feedback = Feedback::None;
     if (closing) return Action::None;
+    const int previousSelection = selected;
     const auto buttons = getButtons(view, hasRun, options, upgrades, coinBank, skins, environments);
     const auto findButton = [&](float x, float y) {
         //Undo the modal transform before checking the individually animated buttons.
@@ -260,7 +279,22 @@ Menu::Action Menu::handleEvent(const SDL_Event& event, View view, bool hasRun,
     } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         pressed = -1;
     }
+    if (selected != previousSelection && selected >= 0 && buttons[selected].enabled &&
+        (event.type == SDL_EVENT_MOUSE_MOTION || (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat))) {
+        const Uint64 now = SDL_GetTicks();
+        if (now - lastHoverSound >= 60) {
+            feedback = Feedback::Hover;
+            lastHoverSound = now;
+        }
+    }
     return Action::None;
+}
+
+Menu::Feedback Menu::takeFeedback()
+{
+    const Feedback result = feedback;
+    feedback = Feedback::None;
+    return result;
 }
 
 std::size_t Menu::firstSkin() const
@@ -284,11 +318,13 @@ std::size_t Menu::getSkinId(Action action) const
 
 Menu::Action Menu::activate(Action action)
 {
+    feedback = Feedback::Click;
     //Navigation waits for the closing bounce; purchases and toggles stay immediate.
     switch (action) {
     case Action::Play: case Action::Restart: case Action::Options: case Action::Quit:
     case Action::Back: case Action::EndRun: case Action::MainMenu: case Action::Shop:
     case Action::Progress: case Action::Environments: case Action::Skins:
+    case Action::FreshGame: case Action::ConfirmFreshGame:
     case Action::StandardSkins: case Action::PremiumSkins:
     case Action::PreviousSkins: case Action::NextSkins:
         close(action);
@@ -370,7 +406,7 @@ SDL_FRect Menu::animatedButtonBounds(const Button& button, std::size_t index) co
 }
 
 void Menu::text(const std::string& value, float centreX, float centreY, int size,
-                SDL_Color colour, bool shadow, float scale) const
+                SDL_Color colour, bool shadow, float scale, float maxWidth) const
 {
     if (value.empty()) {
         return;
@@ -398,8 +434,9 @@ void Menu::text(const std::string& value, float centreX, float centreY, int size
     }
     auto* texture = found->second.get();
     SDL_SetTextureAlphaMod(texture, colour.a);
-    const float width = texture->w * 0.5f * scale;
-    const float height = texture->h * 0.5f * scale;
+    const float fittedScale = maxWidth > 0.0f ? std::min(scale, maxWidth / (texture->w * 0.5f)) : scale;
+    const float width = texture->w * 0.5f * fittedScale;
+    const float height = texture->h * 0.5f * fittedScale;
     SDL_FRect destination{centreX - width * 0.5f, centreY - height * 0.5f, width, height};
     if (shadow) {
         SDL_SetTextureColorMod(texture, 70, 32, 14);
@@ -428,22 +465,22 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
     }
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
     SDL_RenderClear(renderer);
-    panel.draw(renderer, view == View::Shop || view == View::Skins || view == View::Environments ? SDL_FRect{50, 20, 860, 600} :
-        (view == View::Results ? SDL_FRect{170, 20, 620, 600} : SDL_FRect{220, 30, 520, 580}), 64);
+    panel.draw(renderer, view == View::Shop || view == View::Skins || view == View::Environments ? SDL_FRect{50, 20, 860, 590} :
+        (view == View::Results ? SDL_FRect{170, 20, 620, 590} : SDL_FRect{220, 30, 520, 580}), 64);
     const SDL_Color ink{77, 42, 23, 255};
     const SDL_Color muted{119, 83, 52, 255};
     const SDL_Color white{255, 249, 228, 255};
     if (view == View::Environments && environments) {
-        text("ENVIRONMENTS", 480, 72, 58, ink);
-        text("Reach either target in the previous area to unlock the next.", 480, 113, 18, muted);
+        text("ENVIRONMENTS", 480, 80, 48, ink);
+        text("Reach either target in the previous area to unlock the next.", 480, 122, 18, muted);
         for (std::size_t id = 0; id < EnvironmentManager::count; ++id) {
             const auto& definition = EnvironmentManager::definitions[id];
             const auto& record = environments->getRecords()[id];
             const float x = id % 2 == 0 ? 90.0f : 490.0f;
-            const float y = 136.0f + static_cast<float>(id / 2) * 138.0f;
-            card.draw(renderer, {x, y, 380, 128}, 18);
-            text(std::string(definition.name), x + 112, y + 30, 30, ink);
-            text(std::string(definition.physicsDescription), x + 190, y + 65, 18, muted);
+            const float y = gridTop + static_cast<float>(id / 2) * gridRowSpacing;
+            card.draw(renderer, {x, y, 380, 112}, 18);
+            text(std::string(definition.name), x + 130, y + 28, 30, ink, false, 1.0f, 180);
+            text(std::string(definition.physicsDescription), x + 190, y + 60, 18, muted, false, 1.0f, 340);
             std::string detail;
             if (environments->isUnlocked(id)) {
                 detail = "Best: " + std::to_string(static_cast<int>(record.distance)) + " m / " +
@@ -453,44 +490,44 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
                     std::to_string(static_cast<int>(definition.requiredDistance)) + " m OR " +
                     std::to_string(static_cast<int>(definition.requiredHeight)) + " m high";
             }
-            text(detail, x + 190, y + 99, 18, ink);
+            text(detail, x + 190, y + 88, 18, ink, false, 1.0f, 340);
         }
     } else if (view == View::Skins && skins) {
-        text("SKIN SHOP", 480, 80, 58, ink);
+        text("SKIN SHOP", 480, 80, 48, ink);
         text("Bank: " + std::to_string(coinBank) + " coins  |  Unlocked: " +
              std::to_string(skins->getUnlocks().count()) + " / " + std::to_string(SkinManager::count),
-             340, 116, 18, ink);
+             340, 116, 18, ink, false, 1.0f, 460);
         for (std::size_t slot = 0; slot < skinsPerPage; ++slot) {
             const auto id = firstSkin() + slot;
             const auto& skin = SkinManager::catalog().at(id);
             const float x = 100.0f + static_cast<float>(slot % 4) * 194.0f;
-            const float y = slot < 4 ? 194.0f : 366.0f;
-            card.draw(renderer, {x, y, 180, 154}, 18);
+            const float y = skinTop + (slot < 4 ? 0.0f : skinRowSpacing);
+            card.draw(renderer, {x, y, 180, 144}, 18);
             //fit each sprite without distorting crowns, spikes or other decorations
-            const float scale = 68.0f / std::max(skin.source.w, skin.source.h);
+            const float scale = 56.0f / std::max(skin.source.w, skin.source.h);
             const SDL_FRect preview{x + 90 - skin.source.w * scale * 0.5f,
-                y + 46 - skin.source.h * scale * 0.5f, skin.source.w * scale, skin.source.h * scale};
+                y + 40 - skin.source.h * scale * 0.5f, skin.source.w * scale, skin.source.h * scale};
             SDL_RenderTexture(renderer, skinSheets.at(static_cast<std::size_t>(skin.sheet)).get(),
                               &skin.source, &preview);
-            text(std::string(skin.name), x + 90, y + 92, 18, ink);
+            text(std::string(skin.name), x + 90, y + 84, 18, ink, false, 1.0f, 148);
         }
         text("Page " + std::to_string(skinPage + 1) + " / " + std::to_string(skinPageCount()),
-             480, 532, 18, muted);
+             480, 508, 18, muted);
     } else if (view == View::Shop && upgrades) {
-        text("UPGRADE SHOP", 480, 74, 58, ink);
-        text("Bank: " + std::to_string(coinBank) + " coins", 300, 123, 24, ink);
+        text("UPGRADE SHOP", 480, 80, 48, ink);
+        text("Bank: " + std::to_string(coinBank) + " coins", 300, 123, 24, ink, false, 1.0f, 340);
         for (std::size_t i = 0; i < UpgradeManager::count; ++i) {
             const auto id = static_cast<UpgradeId>(i);
             const auto& definition = UpgradeManager::definitions[i];
             const float x = i % 2 == 0 ? 90.0f : 490.0f;
-            const float y = 150.0f + static_cast<float>(i / 2) * 124.0f;
-            card.draw(renderer, {x, y, 380, 112}, 18);
-            const SDL_FRect icon{x + 12, y + 12, 64, 64};
+            const float y = gridTop + static_cast<float>(i / 2) * gridRowSpacing;
+            card.draw(renderer, {x, y, 380, 108}, 18);
+            const SDL_FRect icon{x + 14, y + 14, 52, 52};
             SDL_RenderTexture(renderer, upgradeIcons.at(i).get(), nullptr, &icon);
-            text(std::string(definition.name), x + 164, y + 24, 24, ink);
+            text(std::string(definition.name), x + 150, y + 26, 24, ink, false, 1.0f, 144);
             text("Level " + std::to_string(upgrades->getLevel(id)) + " / " +
-                 std::to_string(definition.maxLevel), x + 164, y + 52, 18, muted);
-            text(std::string(definition.description), x + 190, y + 91, 18, muted);
+                 std::to_string(definition.maxLevel), x + 150, y + 52, 18, muted);
+            text(std::string(definition.description), x + 190, y + 84, 18, muted, false, 1.0f, 340);
         }
     } else if (view == View::Results && result) {
         const auto number = [](double value, int precision) {
@@ -498,11 +535,11 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
             formatted << std::fixed << std::setprecision(precision) << value;
             return formatted.str();
         };
-        text("RUN COMPLETE", 480, 80, 58, ink);
+        text("RUN COMPLETE", 480, 80, 48, ink);
         text("Run coins: " + std::to_string(result->baseCoins), 480, 140, 30, ink);
         const auto rewardRow = [&](const std::string& label, double multiplier, float y) {
-            text(label, 370, y, 24, ink);
-            text("x" + number(multiplier, 2), 650, y, 30, ink);
+            text(label, 370, y, 24, ink, false, 1.0f, 280);
+            text("x" + number(multiplier, 2), 650, y, 30, ink, false, 1.0f, 100);
         };
         rewardRow("Distance: " + number(result->distance, 1) + " m", result->distanceMultiplier, 194);
         rewardRow("Max height: " + number(result->height, 1) + " m", result->heightMultiplier, 236);
@@ -511,15 +548,27 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
         SDL_RenderLine(renderer, 240, 310, 720, 310);
         text("Total multiplier: x" + number(result->totalMultiplier, 2), 480, 332, 24, muted);
         primaryButton.draw(renderer, {270, 358, 420, 68}, 22);
-        text("PAYOUT: +" + std::to_string(result->payout) + " COINS", 480, 391, 30, white, true);
-        text("Bank: " + std::to_string(coinBank) + " coins", 480, 452, 24, ink);
+        text("PAYOUT: +" + std::to_string(result->payout) + " COINS", 480, 391, 30, white, true, 1.0f, 360);
+        text("Bank: " + std::to_string(coinBank) + " coins", 480, 452, 24, ink, false, 1.0f, 460);
     } else if (view == View::Progress) {
         text("SAVE / LOAD", 480, 120, 58, ink);
         text("Coins, upgrades, skins and areas", 480, 184, 24, ink);
-        text("Runs and options are not saved.", 480, 218, 18, muted);
-        text("Automatic saving is also enabled.", 480, 442, 18, muted);
+        text("Choose a file to save or load progress.", 480, 214, 18, muted);
+        text("Autosave is separate. Named saves stay available.", 480, 460, 18, muted, false, 1.0f, 420);
+    } else if (view == View::FreshGame) {
+        text("FRESH GAME", 480, 120, 58, ink);
+        text("Reset coins, upgrades, skins", 480, 190, 24, ink);
+        text("and environment records?", 480, 220, 24, ink);
+        text("Current progress will be backed up first.", 480, 274, 18, muted);
+        text("Existing named saves stay available.", 480, 300, 18, muted);
+        text("Return to Yard with the starter skin.", 480, 520, 18, muted);
     } else {
-        text(view == View::Main ? "PROTOLAUNCH" : "OPTIONS", 480, 120, 58, ink);
+        text(view == View::Main ? "PROTOLAUNCH" : "OPTIONS", 480, view == View::Main ? 104.0f : 120.0f, 58, ink);
+        if (view == View::Options) {
+            text("Music: " + std::to_string(options.musicVolume) + "%", 480, 371, 24, ink);
+            text("Effects: " + std::to_string(options.effectsVolume) + "%", 480, 435, 24, ink);
+            text("Set volume to 0% to mute.", 480, 481, 18, muted);
+        }
     }
 
     const auto buttons = getButtons(view, hasRun, options, upgrades, coinBank, skins, environments);
@@ -536,25 +585,19 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
             !button.enabled ? 155 : (held ? 185 : (focused ? 255 : 242)));
         text(button.label, bounds.x + bounds.w * 0.5f, bounds.y + bounds.h * 0.5f - 1,
              view == View::Skins ? (i < skinsPerPage ? 18 : 24) :
-             (view == View::Results ? 24 : ((view == View::Shop && i < UpgradeManager::count) || view == View::Environments ? 18 : 30)),
-             button.primary ? white : ink, button.primary, scale);
+             (view == View::Results ? 24 :
+              ((view == View::Shop && i < UpgradeManager::count) || (view == View::Environments && i < EnvironmentManager::count) ? 18 : 30)),
+             button.primary ? white : ink, button.primary, scale, (button.bounds.w - 28.0f) * scale);
         if (focused) {
-            if (view == View::Shop || view == View::Skins || view == View::Environments) {
-                SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a);
-                const SDL_FRect outline{bounds.x - 3, bounds.y - 3, bounds.w + 6, bounds.h + 6};
-                SDL_RenderRect(renderer, &outline);
-            } else {
-                text(">", bounds.x - 18, bounds.y + bounds.h * 0.5f, 24, ink);
-            }
+            text(">", bounds.x - 18, bounds.y + bounds.h * 0.5f, 24, ink);
         }
     }
-    if (view == View::Main || view == View::Options) {
-        text(view == View::Options ? "" : "Mouse to aim. Release to launch.",
-             480, 548.0f + (view == View::Options ? 22.0f : 0.0f), 18, muted);
-        if (view == View::Main) {
-            const std::string area = environments ? std::string(EnvironmentManager::definitions[environments->getSelected()].name) : "Yard";
-            text(area + " | Bank: " + std::to_string(coinBank) + " coins", 480, 575, 18, muted);
-        }
+    if (view == View::Main) {
+        text(hasRun ? "Resume to continue your run." : "Mouse to aim. Release to launch.",
+             480, hasRun ? 524.0f : 516.0f, 18, muted);
+        const std::string area = environments ? std::string(EnvironmentManager::definitions[environments->getSelected()].name) : "Yard";
+        text(area + " | Bank: " + std::to_string(coinBank) + " coins", 480, hasRun ? 550.0f : 544.0f,
+             18, muted, false, 1.0f, 420);
     }
     if (!SDL_SetRenderTarget(renderer, previousTarget)) {
         throw std::runtime_error("Menu animation presentation failed: " + std::string(SDL_GetError()));
@@ -568,6 +611,6 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
         (view == View::Shop ? "Upgrades apply to your next run" :
                              "Arrow keys / Tab to select  |  Enter to confirm");
     text(message.empty() ? hint : message,
-         480, 627, 18, {255, 249, 228, static_cast<Uint8>(255.0f * opacity)}, true);
+         480, footerY, 18, {255, 249, 228, static_cast<Uint8>(255.0f * opacity)}, true, 1.0f, 880);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }

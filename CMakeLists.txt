@@ -71,7 +71,7 @@ target_include_directories(gameplay PUBLIC src)
 target_compile_features(gameplay PUBLIC cxx_std_20)
 target_link_libraries(gameplay PUBLIC SDL3::SDL3-static box2d::box2d)
 
-add_executable(game src/main.cpp src/Game.cpp src/Menu.cpp src/RewardEffects.cpp)
+add_executable(game src/main.cpp src/Game.cpp src/Menu.cpp src/RewardEffects.cpp src/SoundEffects.cpp)
 target_link_libraries(game PRIVATE gameplay SDL3_image::SDL3_image SDL3_ttf::SDL3_ttf)
 
 foreach(target game gameplay)
@@ -92,3 +92,10 @@ add_custom_target(game_assets
 )
 
 add_dependencies(game game_assets)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(progress_store_tests tests/ProgressStoreTests.cpp)
+    target_link_libraries(progress_store_tests PRIVATE gameplay)
+    add_test(NAME progress_store COMMAND progress_store_tests "${CMAKE_CURRENT_BINARY_DIR}/test-saves")
+endif()

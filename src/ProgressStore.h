@@ -4,6 +4,7 @@
 #include "SkinManager.h"
 #include "EnvironmentManager.h"
 #include <filesystem>
+#include <optional>
 
 //store progression separately from the assets so rebuilding does not erase purchases
 class ProgressStore {
@@ -12,5 +13,8 @@ public:
     static Load load(const std::filesystem::path& path, UpgradeManager& upgrades, std::int64_t& bank,
                      SkinManager& skins, EnvironmentManager& environments);
     static bool save(const std::filesystem::path& path, const UpgradeManager& upgrades, std::int64_t bank,
+                     const SkinManager& skins, const EnvironmentManager& environments);
+    static std::optional<std::filesystem::path> backup(const std::filesystem::path& directory,
+                     const UpgradeManager& upgrades, std::int64_t bank,
                      const SkinManager& skins, const EnvironmentManager& environments);
 };

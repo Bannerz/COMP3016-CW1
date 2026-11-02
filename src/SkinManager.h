@@ -33,7 +33,7 @@ public:
     static constexpr std::size_t standardCount = ballSprites.size();
     static constexpr std::size_t premiumCount = ultraPremiumSprites.size();
     static constexpr std::size_t count = standardCount + premiumCount;
-    static constexpr std::size_t starter = 6;
+    static constexpr std::size_t starter = 0;
     using Unlocks = std::bitset<count>;
     enum class Purchase { Bought, Equipped, AlreadyEquipped, NotEnoughCoins, Invalid };
 

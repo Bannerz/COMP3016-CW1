@@ -15,16 +15,19 @@ struct MenuOptions {
     bool fullscreen = false;
     bool vsync = false;
     bool antiAliasing = true;
+    int musicVolume = 100;
+    int effectsVolume = 100;
 };
 
 //draw the menus from reusable slices and keep menu input away from the launcher
 class Menu {
 public:
-    enum class View { Main, Options, Results, Shop, Skins, Progress, Environments };
+    enum class View { Main, Options, Results, Shop, Skins, Progress, Environments, FreshGame };
+    enum class Feedback { None, Hover, Click };
     enum class Action { None, Play, Restart, Options, Quit, Back,
-                        Fullscreen, VSync, AntiAliasing, EndRun, MainMenu, Shop,
+                        Fullscreen, VSync, AntiAliasing, MusicDown, MusicUp, EffectsDown, EffectsUp, EndRun, MainMenu, Shop,
                         BuyLauncher, BuyBands, BuyMagnet, BuyLoot, BuyGlider, BuyAirBoost,
-                        Progress, SaveProgress, LoadProgress,
+                        Progress, SaveProgress, LoadProgress, FreshGame, ConfirmFreshGame,
                         Environments, Environment0, Environment1, Environment2, Environment3, Environment4, Environment5,
                         Skins, StandardSkins, PremiumSkins, PreviousSkins, NextSkins,
                         Skin0, Skin1, Skin2, Skin3, Skin4, Skin5, Skin6, Skin7 };
@@ -42,6 +45,7 @@ public:
     void resetInput();
     Action update(double elapsed);
     void close(Action action);
+    Feedback takeFeedback();
     std::size_t getSkinId(Action action) const;
 
 private:
@@ -71,7 +75,7 @@ private:
     std::size_t firstSkin() const;
     std::size_t skinPageCount() const;
     void text(const std::string& value, float centreX, float centreY, int size,
-              SDL_Color colour, bool shadow = false, float scale = 1.0f) const;
+              SDL_Color colour, bool shadow = false, float scale = 1.0f, float maxWidth = 0.0f) const;
     SDL_FRect modalBounds() const;
     float buttonScale(std::size_t index) const;
     SDL_FRect animatedButtonBounds(const Button& button, std::size_t index) const;
@@ -88,6 +92,8 @@ private:
     mutable std::map<std::string, TexturePtr> labels;
     int selected = 0;
     int pressed = -1;
+    Feedback feedback = Feedback::None;
+    Uint64 lastHoverSound = 0;
     std::size_t skinPage = 0;
     bool premiumSkins = false;
     double entranceTime = 0.0;

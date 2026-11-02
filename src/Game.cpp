@@ -7,6 +7,7 @@
 #include "TrampolineManager.h"
 #include "ProgressStore.h"
 #include "RewardEffects.h"
+#include "SoundEffects.h"
 
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
@@ -14,6 +15,24 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <mutex>
+
+struct Game::ProgressDialog {
+    std::mutex mutex;
+    bool ready = false;
+    bool failed = false;
+    bool saving = false;
+    std::string path;
+    std::string defaultLocation;
+};
+
+namespace {
+std::string pathText(const std::filesystem::path& path)
+{
+    const auto utf8 = path.u8string();
+    return {utf8.begin(), utf8.end()};
+}
+}
 
 Game::Game() = default;
 
@@ -21,6 +40,7 @@ Game::~Game()
 {
     //destroy level objects before their world and textures
     rewardEffects.reset();
+    sounds.reset();
     menu.reset();
     unloadLevel();
     renderer.reset();
@@ -69,6 +89,7 @@ void Game::initialize()
     assetDirectory = std::string(basePath) + "assets/images/";
     menu = std::make_unique<Menu>(renderer.get(), std::string(basePath) + "assets/");
     rewardEffects = std::make_unique<RewardEffects>(renderer.get(), std::string(basePath) + "assets/");
+    sounds = std::make_unique<SoundEffects>(std::string(basePath) + "assets/");
     options.vsync = SDL_SetRenderVSync(renderer.get(), 1);
 }
 
@@ -201,6 +222,9 @@ void Game::resetRun()
     stoppedTime = 0.0;
     accumulator = 0.0;
     ball->reset();
+    sounds->reset();
+    impactCooldown = 0.0;
+    lastAudioPosition = ball->getPosition();
     applyEquippedSkin();
     //take a snapshot so purchases made while paused only affect the next attempt
     activeUpgrades = upgrades.getEffects();
@@ -258,7 +282,7 @@ void Game::finishRun()
     menu->resetInput();
 }
 
-void Game::loadProgress(bool manual)
+void Game::loadProgress()
 {
     if (progressPath.empty()) {
         using PathPtr = std::unique_ptr<char, decltype(&SDL_free)>;
@@ -274,17 +298,11 @@ void Game::loadProgress(bool manual)
     //a failed load leaves the current progression untouched
     switch (ProgressStore::load(progressPath, upgrades, coinBank, skins, environments)) {
     case ProgressStore::Load::Loaded:
-        if (manual) {
-            applyEquippedSkin();
-            menuMessage = "Progress loaded.";
-        }
         break;
     case ProgressStore::Load::Missing:
-        if (manual) menuMessage = "No save found. Save your progress first.";
         break;
     case ProgressStore::Load::Invalid:
-        menuMessage = manual ? "Could not load save. Current progress kept." :
-                               "Save could not be read; using default progression.";
+        menuMessage = "Save could not be read; using default progression.";
         break;
     }
 }
@@ -292,6 +310,145 @@ void Game::loadProgress(bool manual)
 bool Game::saveProgress() const
 {
     return ProgressStore::save(progressPath, upgrades, coinBank, skins, environments);
+}
+
+void SDLCALL Game::progressDialogCallback(void* userdata, const char* const* files, int)
+{
+    //SDL may call back on another thread, including after the game has closed.
+    //The callback owns shared state and never touches Game or its renderer.
+    std::unique_ptr<std::shared_ptr<ProgressDialog>> owner(
+        static_cast<std::shared_ptr<ProgressDialog>*>(userdata));
+    const auto state = *owner;
+    std::lock_guard lock(state->mutex);
+    state->failed = files == nullptr;
+    if (files && files[0]) state->path = files[0];
+    if (state->failed) SDL_Log("Save/load dialog failed: %s", SDL_GetError());
+    state->ready = true;
+}
+
+void Game::openProgressDialog(bool saving)
+{
+    if (progressDialog) return;
+    progressDialog = std::make_shared<ProgressDialog>();
+    progressDialog->saving = saving;
+    const auto directory = lastManualSave.empty() ? progressPath.parent_path() : lastManualSave.parent_path();
+    progressDialog->defaultLocation = pathText(saving ? directory / "my-save.dat" :
+                                              (lastManualSave.empty() ? directory : lastManualSave));
+    //Filters must outlive the asynchronous native dialog.
+    static constexpr SDL_DialogFileFilter filters[] = {{"Protolaunch saves", "dat"}, {"All files", "*"}};
+    auto* callbackState = new std::shared_ptr<ProgressDialog>(progressDialog);
+    const char* location = progressDialog->defaultLocation.empty() ? nullptr : progressDialog->defaultLocation.c_str();
+    menuMessage = saving ? "Choose a name and location for your save." : "Choose a save file to load.";
+    if (saving) SDL_ShowSaveFileDialog(progressDialogCallback, callbackState, window.get(), filters, 2, location);
+    else SDL_ShowOpenFileDialog(progressDialogCallback, callbackState, window.get(), filters, 2, location, false);
+}
+
+void Game::pollProgressDialog()
+{
+    if (!progressDialog) return;
+    bool failed = false;
+    bool saving = false;
+    std::string selected;
+    {
+        std::lock_guard lock(progressDialog->mutex);
+        if (!progressDialog->ready) return;
+        failed = progressDialog->failed;
+        saving = progressDialog->saving;
+        selected = progressDialog->path;
+    }
+    progressDialog.reset();
+    menu->resetInput();
+    if (failed) {
+        menuMessage = "File dialog unavailable. Current progress kept.";
+        return;
+    }
+    if (selected.empty()) {
+        menuMessage = saving ? "Save cancelled." : "Load cancelled. Current progress kept.";
+        return;
+    }
+    auto path = std::filesystem::path(std::u8string(selected.begin(), selected.end()));
+    if (saving) {
+        if (path.extension().empty()) {
+            path += ".dat";
+            //SDL's Windows dialog does not append an extension. If adding one
+            //finds an existing file, ask before replacing a file the dialog never checked.
+            std::error_code error;
+            const bool exists = std::filesystem::exists(path, error);
+            if (error) {
+                menuMessage = "Could not access save location. Current progress kept.";
+                return;
+            }
+            if (exists) {
+                const SDL_MessageBoxButtonData buttons[] = {
+                    {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel"},
+                    {0, 1, "Replace"}
+                };
+                const SDL_MessageBoxData box{SDL_MESSAGEBOX_WARNING, window.get(), "Replace save?",
+                    "A save with that name already exists. Replace it?", 2, buttons, nullptr};
+                int choice = 0;
+                if (!SDL_ShowMessageBox(&box, &choice) || choice != 1) {
+                    menuMessage = "Save cancelled. Existing file kept.";
+                    return;
+                }
+            }
+        }
+        if (ProgressStore::save(path, upgrades, coinBank, skins, environments)) {
+            lastManualSave = path;
+            menuMessage = "Saved: " + pathText(path.filename());
+        } else menuMessage = "Could not save file. Current progress kept.";
+        return;
+    }
+    UpgradeManager loadedUpgrades;
+    SkinManager loadedSkins;
+    EnvironmentManager loadedEnvironments;
+    std::int64_t loadedBank = 0;
+    if (ProgressStore::load(path, loadedUpgrades, loadedBank, loadedSkins, loadedEnvironments) != ProgressStore::Load::Loaded) {
+        menuMessage = "Invalid or unreadable save. Current progress kept.";
+        return;
+    }
+    upgrades = loadedUpgrades;
+    skins = loadedSkins;
+    environments = loadedEnvironments;
+    coinBank = loadedBank;
+    lastManualSave = path;
+    //Loading a different progression must not carry rewards from the old paused run.
+    hasRun = false;
+    activeEnvironment = environments.getSelected();
+    loadLevel(environments.makeLevel(activeEnvironment));
+    menuMessage = saveProgress() ? "Loaded: " + pathText(path.filename()) :
+                                  "Save loaded, but autosave failed.";
+}
+
+void Game::startFreshGame()
+{
+    if (progressPath.empty() || !ProgressStore::backup(progressPath.parent_path(), upgrades, coinBank, skins, environments)) {
+        screen = Screen::Progress;
+        menu->resetInput();
+        menuMessage = "Could not back up progress. Fresh game cancelled.";
+        return;
+    }
+    UpgradeManager freshUpgrades;
+    SkinManager freshSkins;
+    EnvironmentManager freshEnvironments;
+    //Keep the current session intact if writing the fresh autosave fails.
+    if (!ProgressStore::save(progressPath, freshUpgrades, 0, freshSkins, freshEnvironments)) {
+        screen = Screen::Progress;
+        menu->resetInput();
+        menuMessage = "Could not save fresh game. Current progress kept.";
+        return;
+    }
+    upgrades = freshUpgrades;
+    skins = freshSkins;
+    environments = freshEnvironments;
+    coinBank = 0;
+    hasRun = false;
+    activeEnvironment = 0;
+    loadLevel(environments.makeLevel(activeEnvironment));
+    screen = Screen::MainMenu;
+    shopReturnScreen = Screen::MainMenu;
+    environmentReturnScreen = Screen::MainMenu;
+    menu->resetInput();
+    menuMessage = "Fresh game ready. Previous progress backed up.";
 }
 
 void Game::applyEquippedSkin()
@@ -362,6 +519,7 @@ Menu::View Game::menuView() const
     if (screen == Screen::Options) return Menu::View::Options;
     if (screen == Screen::Environments) return Menu::View::Environments;
     if (screen == Screen::Progress) return Menu::View::Progress;
+    if (screen == Screen::FreshGame) return Menu::View::FreshGame;
     return Menu::View::Main;
 }
 
@@ -374,6 +532,7 @@ void Game::handleEvents()
             running = false;
             continue;
         }
+        if (progressDialog) continue; //the native file dialog owns input until it finishes
         if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && !event.key.repeat) {
             if (screen == Screen::Playing) {
                 ball->cancelDrag();
@@ -398,7 +557,11 @@ void Game::handleEvents()
         }
         //menu events never reach the ball, even when a button starts a run
         if (screen != Screen::Playing) {
-            applyMenuAction(menu->handleEvent(event, menuView(), hasRun, options, &upgrades, coinBank, &skins, &environments));
+            const auto action = menu->handleEvent(event, menuView(), hasRun, options, &upgrades, coinBank, &skins, &environments);
+            const auto feedback = menu->takeFeedback();
+            if (feedback == Menu::Feedback::Hover) sounds->play(SoundEffects::Effect::ButtonHover, 0.11f);
+            if (feedback == Menu::Feedback::Click) sounds->play(SoundEffects::Effect::ButtonClick, 0.24f);
+            applyMenuAction(action);
             continue;
         }
         if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_R && !event.key.repeat) {
@@ -414,7 +577,15 @@ void Game::handleEvents()
             ball->boost(450.0f);
             --boostsRemaining;
         }
+        const auto previousState = ball->getState();
         launcher->handleEvent(event, camera, *ball);
+        if (previousState == Ball::State::Dragging && ball->getState() == Ball::State::Flying) {
+            const auto anchor = launcher->getAnchor();
+            const auto position = ball->getPosition();
+            const float tension = std::clamp(std::hypot(position.x - anchor.x, position.y - anchor.y) /
+                (levelSettings.maxDragDistance + activeUpgrades.pullBonus), 0.0f, 1.0f);
+            sounds->play(SoundEffects::Effect::Release, 0.35f + tension * 0.40f, 0.85f + tension * 0.25f);
+        }
     }
 }
 
@@ -460,10 +631,17 @@ void Game::applyMenuAction(Menu::Action action)
         menu->resetInput();
         break;
     case Menu::Action::SaveProgress:
-        menuMessage = saveProgress() ? "Progress saved." : "Could not save progress. Try again.";
+        openProgressDialog(true);
         break;
     case Menu::Action::LoadProgress:
-        loadProgress(true);
+        openProgressDialog(false);
+        break;
+    case Menu::Action::FreshGame:
+        screen = Screen::FreshGame;
+        menu->resetInput();
+        break;
+    case Menu::Action::ConfirmFreshGame:
+        startFreshGame();
         break;
     case Menu::Action::Shop:
         if (screen != Screen::Skins && screen != Screen::Shop) shopReturnScreen = screen;
@@ -503,8 +681,10 @@ void Game::applyMenuAction(Menu::Action action)
         screen = Screen::MainMenu;
         break;
     case Menu::Action::Back:
-        screen = screen == Screen::Environments ? environmentReturnScreen :
-            (screen == Screen::Shop || screen == Screen::Skins ? shopReturnScreen : Screen::MainMenu);
+        screen = screen == Screen::FreshGame ? Screen::Progress :
+            (screen == Screen::Environments ? environmentReturnScreen :
+            (screen == Screen::Shop || screen == Screen::Skins ? shopReturnScreen : Screen::MainMenu));
+        //The fresh-game confirmation returns to Save / Load without changing progress.
         break;
     case Menu::Action::Quit:
         running = false;
@@ -531,6 +711,18 @@ void Game::applyMenuAction(Menu::Action action)
             menuMessage = "This graphics setting could not be applied.";
         }
         break;
+    case Menu::Action::MusicDown:
+        options.musicVolume = std::max(0, options.musicVolume - 10);
+        break;
+    case Menu::Action::MusicUp:
+        options.musicVolume = std::min(100, options.musicVolume + 10);
+        break;
+    case Menu::Action::EffectsDown:
+        options.effectsVolume = std::max(0, options.effectsVolume - 10);
+        break;
+    case Menu::Action::EffectsUp:
+        options.effectsVolume = std::min(100, options.effectsVolume + 10);
+        break;
     case Menu::Action::None:
         break;
     }
@@ -544,6 +736,7 @@ void Game::applyMenuAction(Menu::Action action)
 
 void Game::update(double elapsed)
 {
+    pollProgressDialog();
     if (screen != Screen::Playing) {
         applyMenuAction(menu->update(elapsed));
         accumulator = 0.0;
@@ -555,16 +748,32 @@ void Game::update(double elapsed)
         rewardEffects->update(static_cast<float>(physicsStep));
         trampolines->animate(static_cast<float>(physicsStep));
         const SDL_FPoint previous = ball->getPosition();
+        impactCooldown = std::max(0.0, impactCooldown - physicsStep);
         ground->update(ball->getPhysicsPosition().x);
         b2World_Step(physicsWorld, static_cast<float>(physicsStep), 4);
         ball->updateFromPhysics();
 
         if (ball->getState() == Ball::State::Flying) {
+            //The ground is the only physical collider; trampoline crossings are handled below.
+            //Use collision events so fast landings still sound if the ball has already rebounded.
+            const auto contacts = b2World_GetContactEvents(physicsWorld);
+            float impactSpeed = 0.0f;
+            for (int i = 0; i < contacts.hitCount; ++i) {
+                impactSpeed = std::max(impactSpeed, contacts.hitEvents[i].approachSpeed);
+            }
+            if (impactSpeed > 0.8f && impactCooldown <= 0.0) {
+                const float strength = std::clamp(impactSpeed / 20.0f, 0.0f, 1.0f);
+                sounds->play(SoundEffects::Effect::Impact, 0.18f + strength * 0.60f,
+                             1.10f - strength * 0.25f);
+                impactCooldown = 0.10;
+            }
             //check the whole movement so fast falls cannot skip through a mat
             const SDL_FPoint current = ball->getPosition();
             trampolines->update(current.x, current.y);
             if (const auto landing = trampolines->land(previous, current, ball->getRadius())) {
                 ball->bounce(landing->position, landing->upwardSpeed);
+                sounds->play(SoundEffects::Effect::Trampoline, 0.65f,
+                             0.95f + static_cast<float>(landing->reward) * 0.006f);
                 coins->addCoins(landing->reward);
                 rewardEffects->add(camera.worldToScreen(landing->position.x, landing->position.y),
                                    landing->reward, RewardEffects::Kind::Trampoline);
@@ -576,6 +785,12 @@ void Game::update(double elapsed)
             for (const auto& pickup : coins->getPickups()) {
                 rewardEffects->add(camera.worldToScreen(pickup.position.x, pickup.position.y),
                                    pickup.value, RewardEffects::Kind::Coin);
+            }
+            //One chime per pickup batch keeps dense coin clusters from becoming harsh.
+            if (!coins->getPickups().empty()) {
+                int value = 1;
+                for (const auto& pickup : coins->getPickups()) value = std::max(value, pickup.value);
+                sounds->play(SoundEffects::Effect::Coin, 0.42f, 1.0f + static_cast<float>(value - 1) * 0.09f);
             }
             //require a short, continuous rest so ordinary landings do not end the run
             const b2Vec2 velocity = ball->getPhysicsVelocity();
@@ -594,6 +809,38 @@ void Game::update(double elapsed)
         const SDL_FPoint position = ball->getPosition();
         camera.follow(position.x, position.y);
     }
+}
+
+void Game::updateAudio(double elapsed)
+{
+    sounds->setVolumes(static_cast<float>(options.musicVolume) / 100.0f,
+                       static_cast<float>(options.effectsVolume) / 100.0f);
+    sounds->setMusic(!running ? SoundEffects::Music::None :
+                     (screen == Screen::Playing && ball->getState() == Ball::State::Flying
+                         ? SoundEffects::Music::Gameplay : SoundEffects::Music::Menu));
+    sounds->setLoop(SoundEffects::Effect::Pull, 0.0f);
+    sounds->setLoop(SoundEffects::Effect::Roll, 0.0f);
+    const auto position = ball->getPosition();
+    if (screen == Screen::Playing && ball->getState() == Ball::State::Dragging) {
+        const auto anchor = launcher->getAnchor();
+        const float tension = std::clamp(std::hypot(position.x - anchor.x, position.y - anchor.y) /
+            (levelSettings.maxDragDistance + activeUpgrades.pullBonus), 0.0f, 1.0f);
+        const float movement = std::hypot(position.x - lastAudioPosition.x, position.y - lastAudioPosition.y) /
+                               static_cast<float>(std::max(elapsed, 0.001));
+        sounds->setLoop(SoundEffects::Effect::Pull,
+                        tension * (0.025f + 0.28f * std::clamp(movement / 350.0f, 0.0f, 1.0f)),
+                        0.70f + 0.80f * tension);
+    } else if (screen == Screen::Playing && ball->getState() == Ball::State::Flying &&
+               position.y + ball->getRadius() >= floorY - 2.0f) {
+        const auto velocity = ball->getPhysicsVelocity();
+        const float speed = std::abs(velocity.x);
+        if (speed > 0.2f && std::abs(velocity.y) < 0.8f) {
+            const float amount = std::clamp(speed / 15.0f, 0.0f, 1.0f);
+            sounds->setLoop(SoundEffects::Effect::Roll, 0.014f + amount * 0.08f, 0.65f + amount * 0.80f);
+        }
+    }
+    lastAudioPosition = position;
+    sounds->update();
 }
 
 void Game::draw() const
@@ -702,9 +949,19 @@ int Game::run()
         previousTicks = currentTicks;
 
         update(elapsed);
+        updateAudio(elapsed);
         draw();
         //vsync already waits for the display, so avoid waiting a second frame
         SDL_Delay(options.vsync ? 1 : 16);
     }
+    //Let the final music fade reach the device before SDL tears down the stream.
+    sounds->reset();
+    sounds->setMusic(SoundEffects::Music::None);
+    const Uint64 fadeDeadline = SDL_GetTicks() + 1100;
+    while (sounds->isMusicPlaying() && SDL_GetTicks() < fadeDeadline) {
+        sounds->update();
+        SDL_Delay(8);
+    }
+    SDL_Delay(50); //drain the mixer's final queued audio
     return 0;
 }

@@ -29,6 +29,7 @@ Ball::Ball(b2WorldId world, SDL_Texture* texture, SDL_FPoint startPosition,
     circle.radius = getRadius() / pixelsPerMetre;
     b2ShapeDef shapeDef = b2DefaultShapeDef();
     shapeDef.density = 1.0f;
+    shapeDef.enableHitEvents = true;
     shapeDef.material.friction = 0.4f;
     shapeDef.material.restitution = 0.35f;
     shapeDef.material.rollingResistance = 0.15f;

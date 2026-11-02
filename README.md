@@ -28,12 +28,17 @@ upgrades to fly further and earn bigger payouts.
 | Enter or Space | Activate the selected menu button |
 
 The main menu offers Play, Shop, Environments, Save / Load, Options and Quit. During a run it
-also offers Resume and End run. Options controls fullscreen, VSync and anti-aliasing; changes
+also offers Resume and End run. Options controls fullscreen, VSync, anti-aliasing,
+music volume and effects volume; changes
 apply immediately for the current session.
+Use the music and effects minus/plus buttons to adjust each volume in 10% steps;
+0% mutes that channel. Effects volume includes gameplay and menu button sounds.
 
 Menu panels pop in with a short bounce, followed by staggered button bounces.
 The animation also plays when reopening a menu or changing skin pages, and mouse
 hit areas follow the moving buttons.
+Menu layouts reserve space for footer hints, panel borders and selection arrows;
+long labels and currency values fit within their allotted width.
 Closing a menu gives it a small anticipation bounce before it shrinks and fades
 away over 0.22 seconds. Navigation, Resume, Play and Quit complete after the close;
 repeated input during the transition is ignored. Purchases and option toggles remain immediate.
@@ -116,12 +121,19 @@ and fades, pauses with the game and clears when starting a new run.
 Coins and purchased levels save automatically to `progress.dat` in SDL's
 Protolaunch preferences folder, outside the build and asset folders. Copy this
 file to the corresponding preferences folder to move progression between machines.
-Choose **Save / Load** from the main or pause menu to explicitly save or reload
-coins, upgrade levels, skins and environments. Feedback confirms success or explains a failure;
-missing or invalid saves leave your current progress intact. These buttons use
-the same plain-text `progress.dat` file as automatic saving. Runs and options are
-not saved. Loading while paused keeps the current run and its upgrade effects;
-loaded upgrade levels apply on the next run, while the equipped skin updates immediately.
+Choose **Save / Load** from the main or pause menu. **Save as...** opens the native
+file dialog to name and store independent `.dat` saves; **Load file...** opens a
+file picker. Save as many files as you like and choose any of them later. Named
+saves are separate from automatic `progress.dat` saves and are only changed when
+you explicitly save over them. Cancelled dialogs and invalid files leave current
+progress intact. Loading ends any paused run, restores coins, upgrades, skins and
+environments, and updates autosave. Runs and options are not saved.
+
+**Fresh game** opens a confirmation screen. Confirming first creates a uniquely
+named `progress-backup-*.dat` in the preferences folder, then resets coins,
+upgrades, skins and environment records to the starter progression in Yard.
+Existing named saves and backups remain available through **Load file...**.
+If backup or autosave fails, the reset is cancelled and current progression stays intact.
 Prices, limits and effects are defined in `UpgradeManager.h` / `.cpp`.
 
 ## Skin shop
@@ -139,6 +151,33 @@ ultra-premium unlocks cost 1,200–3,500 coins.
 Unlocks and the equipped skin save alongside coins and upgrades. Older saves
 load their existing currency and upgrades, and gain the default starter skins.
 Skin names, prices and sprite rectangles are defined in `SkinManager.h` / `.cpp`.
+
+## Sound effects
+
+Original procedural effects in `src/assets/audio` cover rubber pull, release twang,
+coin chimes, trampoline springs, ground impacts and rolling. Pull pitch follows tension;
+movement makes the creak louder. Impact volume follows landing speed, and rolling
+volume and pitch follow horizontal speed. Loops fade out on pause or release, and
+reset with each run. Missing audio devices leave the game playable without sound.
+
+Menu buttons have a quiet hover pip and a soft activation pop, for mouse and keyboard
+input. Disabled buttons stay silent; hover cues are rate-limited to avoid chatter.
+Rolling sits quietly beneath the other effects.
+
+Regenerate the eight 48 kHz mono PCM WAV files with `node tools/generate-sounds.mjs`.
+No external samples, audio dependencies or online services are needed.
+
+Music uses the supplied WAV tracks: **The Mountain** in menus (including pause,
+shops and results) and while aiming, then **Hitslab** starts when the ball launches.
+Tracks loop in stereo and crossfade over 0.8 seconds on launch and when returning
+to menus. Music fades
+in on startup and out before exit; menu navigation and run resets keep playback
+continuous. Fully faded tracks retain their position for the next transition.
+
+## Music acknowledgements
+
+- Menu and aiming music by [The_Mountain](https://pixabay.com/users/the_mountain-3616498/), sourced from Pixabay.
+- Gameplay music by [HitsLab](https://pixabay.com/users/hitslab-47305729/), sourced from Pixabay.
 
 ## Built with
 

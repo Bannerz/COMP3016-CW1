@@ -6,6 +6,7 @@
 #include <limits>
 #include <string>
 #include <system_error>
+#include <chrono>
 
 ProgressStore::Load ProgressStore::load(const std::filesystem::path& path,
                                       UpgradeManager& upgrades, std::int64_t& bank, SkinManager& skins, EnvironmentManager& environments)
@@ -102,4 +103,22 @@ bool ProgressStore::save(const std::filesystem::path& path, const UpgradeManager
         return false;
     }
     return true;
+}
+
+std::optional<std::filesystem::path> ProgressStore::backup(const std::filesystem::path& directory,
+                                const UpgradeManager& upgrades, std::int64_t bank,
+                                const SkinManager& skins, const EnvironmentManager& environments)
+{
+    const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    for (int suffix = 0; ; ++suffix) {
+        const auto path = directory / ("progress-backup-" + std::to_string(timestamp) +
+                                      "-" + std::to_string(suffix) + ".dat");
+        std::error_code error;
+        const bool exists = std::filesystem::exists(path, error);
+        if (error) return std::nullopt;
+        if (exists) continue;
+        return save(path, upgrades, bank, skins, environments)
+            ? std::optional<std::filesystem::path>(path) : std::nullopt;
+    }
 }

@@ -21,6 +21,7 @@ class GroundManager;
 class Background;
 class TrampolineManager;
 class RewardEffects;
+class SoundEffects;
 
 //own the application resources and coordinate the current level
 class Game {
@@ -46,8 +47,13 @@ private:
     void buySkin(std::size_t id);
     void selectEnvironment(std::size_t id);
     void applyEquippedSkin();
-    void loadProgress(bool manual = false);
+    void loadProgress();
     bool saveProgress() const;
+    struct ProgressDialog;
+    void openProgressDialog(bool saving);
+    void pollProgressDialog();
+    static void SDLCALL progressDialogCallback(void* userdata, const char* const* files, int filter);
+    void startFreshGame();
     Menu::View menuView() const;
     void loadLevel(const LevelConfig& settings);
     void unloadLevel();
@@ -56,6 +62,7 @@ private:
     void finishRun();
     void handleEvents();
     void update(double elapsed);
+    void updateAudio(double elapsed);
     void draw() const;
 
     static constexpr int windowWidth = 960;
@@ -71,7 +78,7 @@ private:
     bool running = false;
     double accumulator = 0.0;
     std::string assetDirectory;
-    enum class Screen { MainMenu, Options, Playing, Results, Shop, Skins, Progress, Environments };
+    enum class Screen { MainMenu, Options, Playing, Results, Shop, Skins, Progress, Environments, FreshGame };
     Screen screen = Screen::MainMenu;
     Screen shopReturnScreen = Screen::MainMenu;
     bool hasRun = false;
@@ -82,6 +89,8 @@ private:
     std::optional<RunResult> result;
     std::int64_t coinBank = 0;
     double stoppedTime = 0.0;
+    double impactCooldown = 0.0;
+    SDL_FPoint lastAudioPosition{};
     UpgradeManager upgrades;
     SkinManager skins;
     EnvironmentManager environments;
@@ -92,6 +101,8 @@ private:
     LevelConfig levelSettings;
     std::string loadedLauncherImage;
     std::filesystem::path progressPath;
+    std::filesystem::path lastManualSave;
+    std::shared_ptr<ProgressDialog> progressDialog;
 
     WindowPtr window{nullptr, SDL_DestroyWindow};
     RendererPtr renderer{nullptr, SDL_DestroyRenderer};
@@ -124,4 +135,5 @@ private:
     std::unique_ptr<TrampolineManager> trampolines;
     std::unique_ptr<Menu> menu;
     std::unique_ptr<RewardEffects> rewardEffects;
+    std::unique_ptr<SoundEffects> sounds;
 };
