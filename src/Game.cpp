@@ -216,7 +216,8 @@ void Game::resetRun()
         loadedLauncherImage = sprite;
     }
     launcher->configure(launcherTexture.get(), levelSettings.launchPower * activeUpgrades.launchMultiplier,
-                        levelSettings.maxDragDistance + activeUpgrades.pullBonus);
+                        levelSettings.maxDragDistance + activeUpgrades.pullBonus,
+                        upgrades.getLevel(UpgradeId::Bands));
     auto coinWeights = levelSettings.coinValueWeights;
     for (std::size_t i = 0; i < coinWeights.size(); ++i) {
         coinWeights[i] *= activeUpgrades.coinWeightMultipliers[i];
@@ -374,22 +375,18 @@ void Game::handleEvents()
             continue;
         }
         if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && !event.key.repeat) {
-            if (screen == Screen::Environments) {
-                screen = environmentReturnScreen;
-            } else if (screen == Screen::Shop || screen == Screen::Skins) {
-                screen = shopReturnScreen;
-            } else if (screen == Screen::Options || screen == Screen::Results || screen == Screen::Progress) {
-                screen = Screen::MainMenu;
-            } else if (screen == Screen::Playing) {
+            if (screen == Screen::Playing) {
                 ball->cancelDrag();
                 SDL_CaptureMouse(false);
                 screen = Screen::MainMenu;
+                menu->resetInput();
+                menuMessage.clear();
+            } else if (screen != Screen::MainMenu) {
+                menu->close(Menu::Action::Back);
             } else if (hasRun) {
-                screen = Screen::Playing;
+                menu->close(Menu::Action::Play);
             }
             accumulator = 0.0;
-            menu->resetInput();
-            menuMessage.clear();
             continue;
         }
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST && screen == Screen::Playing) {
@@ -548,6 +545,7 @@ void Game::applyMenuAction(Menu::Action action)
 void Game::update(double elapsed)
 {
     if (screen != Screen::Playing) {
+        applyMenuAction(menu->update(elapsed));
         accumulator = 0.0;
         return;
     }
@@ -621,7 +619,7 @@ void Game::draw() const
                            activeUpgrades.magnetRange);
     coins->draw(renderer.get(), camera);
     trampolines->draw(renderer.get(), camera);
-    launcher->draw(renderer.get(), camera);
+    launcher->draw(renderer.get(), camera, *ball);
     ball->draw(renderer.get(), camera);
 
     //downsample the scene, then draw the interface at the window resolution

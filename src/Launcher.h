@@ -13,9 +13,9 @@ public:
              SDL_FPoint anchorOffset, float launchPower, float maxDragDistance);
 
     void handleEvent(const SDL_Event& event, const Camera& camera, Ball& ball) const;
-    void draw(SDL_Renderer* renderer, const Camera& camera) const;
+    void draw(SDL_Renderer* renderer, const Camera& camera, const Ball& ball) const;
     SDL_FPoint getAnchor() const;
-    void configure(SDL_Texture* sprite, float power, float pullDistance);
+    void configure(SDL_Texture* sprite, float power, float pullDistance, int level);
 
 private:
     SDL_FPoint clampPull(SDL_FPoint mousePosition) const;
@@ -26,4 +26,5 @@ private:
     SDL_FPoint anchorOffset;
     float launchPower;
     float maxDragDistance;
+    int bandsLevel = 0;
 };

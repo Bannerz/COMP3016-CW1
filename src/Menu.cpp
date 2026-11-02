@@ -6,8 +6,31 @@
 #include <sstream>
 #include <stdexcept>
 
+namespace {
+//A quick overshoot followed by a gentle settle, with an exact resting value.
+float popProgress(double elapsed, double duration)
+{
+    const float t = static_cast<float>(std::clamp(elapsed / duration, 0.0, 1.0)) - 1.0f;
+    return 1.0f + 2.70158f * t * t * t + 1.70158f * t * t;
+}
+
+SDL_FRect scaleAboutCentre(SDL_FRect bounds, float scale)
+{
+    return {bounds.x + bounds.w * (1.0f - scale) * 0.5f,
+            bounds.y + bounds.h * (1.0f - scale) * 0.5f,
+            bounds.w * scale, bounds.h * scale};
+}
+}
+
 Menu::Menu(SDL_Renderer* renderer, const std::string& assetRoot) : renderer(renderer)
 {
+    //Compose at double resolution so text stays crisp while the whole modal bounces.
+    modalTexture.reset(SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                         SDL_TEXTUREACCESS_TARGET, 1920, 1280));
+    if (!modalTexture || !SDL_SetTextureBlendMode(modalTexture.get(), SDL_BLENDMODE_BLEND) ||
+        !SDL_SetTextureScaleMode(modalTexture.get(), SDL_SCALEMODE_LINEAR)) {
+        throw std::runtime_error("Menu animation texture failed: " + std::string(SDL_GetError()));
+    }
     const std::string images = assetRoot + "images/";
     panel = loadNineSlice(images + "ui-panel.png", 96);
     //exclude the unused transparent space above and below the button artwork
@@ -192,11 +215,16 @@ Menu::Action Menu::handleEvent(const SDL_Event& event, View view, bool hasRun,
                                const MenuOptions& options, const UpgradeManager* upgrades,
                                std::int64_t coinBank, const SkinManager* skins, const EnvironmentManager* environments)
 {
+    if (closing) return Action::None;
     const auto buttons = getButtons(view, hasRun, options, upgrades, coinBank, skins, environments);
     const auto findButton = [&](float x, float y) {
-        const SDL_FPoint point{x, y};
+        //Undo the modal transform before checking the individually animated buttons.
+        const SDL_FRect modal = modalBounds();
+        const SDL_FPoint point{(x - modal.x) * 960.0f / modal.w,
+                               (y - modal.y) * 640.0f / modal.h};
         for (std::size_t i = 0; i < buttons.size(); ++i) {
-            if (buttons[i].enabled && SDL_PointInRectFloat(&point, &buttons[i].bounds)) {
+            const SDL_FRect bounds = animatedButtonBounds(buttons[i], i);
+            if (buttons[i].enabled && SDL_PointInRectFloat(&point, &bounds)) {
                 return static_cast<int>(i);
             }
         }
@@ -256,26 +284,93 @@ std::size_t Menu::getSkinId(Action action) const
 
 Menu::Action Menu::activate(Action action)
 {
-    //page and category changes belong to the shop UI, rather than game state
+    //Navigation waits for the closing bounce; purchases and toggles stay immediate.
     switch (action) {
-    case Action::StandardSkins: premiumSkins = false; skinPage = 0; break;
-    case Action::PremiumSkins: premiumSkins = true; skinPage = 0; break;
-    case Action::PreviousSkins: if (skinPage > 0) --skinPage; break;
-    case Action::NextSkins: if (skinPage + 1 < skinPageCount()) ++skinPage; break;
+    case Action::Play: case Action::Restart: case Action::Options: case Action::Quit:
+    case Action::Back: case Action::EndRun: case Action::MainMenu: case Action::Shop:
+    case Action::Progress: case Action::Environments: case Action::Skins:
+    case Action::StandardSkins: case Action::PremiumSkins:
+    case Action::PreviousSkins: case Action::NextSkins:
+        close(action);
+        return Action::None;
     default: return action;
     }
-    resetInput();
-    return Action::None;
+}
+
+void Menu::close(Action action)
+{
+    if (closing || action == Action::None) return;
+    //Capture the current pose so closing midway through an entrance never jumps.
+    exitStartBounds = modalBounds();
+    closing = true;
+    exitTime = 0.0;
+    pendingAction = action;
+    pressed = -1;
 }
 
 void Menu::resetInput()
 {
     selected = 0;
     pressed = -1;
+    entranceTime = 0.0;
+    exitTime = 0.0;
+    closing = false;
+    pendingAction = Action::None;
+}
+
+Menu::Action Menu::update(double elapsed)
+{
+    if (closing) {
+        exitTime = std::min(exitTime + std::max(elapsed, 0.0), exitDuration);
+        if (exitTime < exitDuration) return Action::None;
+        const Action action = pendingAction;
+        //Page and category changes belong to the shop UI, rather than game state.
+        switch (action) {
+        case Action::StandardSkins: premiumSkins = false; skinPage = 0; break;
+        case Action::PremiumSkins: premiumSkins = true; skinPage = 0; break;
+        case Action::PreviousSkins: if (skinPage > 0) --skinPage; break;
+        case Action::NextSkins: if (skinPage + 1 < skinPageCount()) ++skinPage; break;
+        default:
+            resetInput();
+            return action;
+        }
+        resetInput();
+        return Action::None;
+    }
+    //UI time continues while gameplay is paused; cap at the fully settled state.
+    entranceTime = std::min(entranceTime + std::max(elapsed, 0.0), 1.0);
+    return Action::None;
+}
+
+SDL_FRect Menu::modalBounds() const
+{
+    if (closing) {
+        const float t = static_cast<float>(exitTime / exitDuration);
+        //A small anticipation stretch, then a quick shrink away.
+        const float progress = t * t * (1.8f * t - 0.8f);
+        SDL_FRect bounds = scaleAboutCentre(exitStartBounds, 1.0f - 0.88f * progress);
+        bounds.y += 20.0f * t * t;
+        return bounds;
+    }
+    const float progress = popProgress(entranceTime, 0.42);
+    SDL_FRect bounds = scaleAboutCentre({0, 0, 960, 640}, 0.84f + 0.16f * progress);
+    bounds.y += 24.0f * (1.0f - progress);
+    return bounds;
+}
+
+float Menu::buttonScale(std::size_t index) const
+{
+    const double delay = 0.06 + std::min(static_cast<double>(index) * 0.025, 0.18);
+    return 0.65f + 0.35f * popProgress(entranceTime - delay, 0.36);
+}
+
+SDL_FRect Menu::animatedButtonBounds(const Button& button, std::size_t index) const
+{
+    return scaleAboutCentre(button.bounds, buttonScale(index));
 }
 
 void Menu::text(const std::string& value, float centreX, float centreY, int size,
-                SDL_Color colour, bool shadow) const
+                SDL_Color colour, bool shadow, float scale) const
 {
     if (value.empty()) {
         return;
@@ -302,8 +397,9 @@ void Menu::text(const std::string& value, float centreX, float centreY, int size
         found = labels.emplace(key, std::move(texture)).first;
     }
     auto* texture = found->second.get();
-    const float width = texture->w * 0.5f;
-    const float height = texture->h * 0.5f;
+    SDL_SetTextureAlphaMod(texture, colour.a);
+    const float width = texture->w * 0.5f * scale;
+    const float height = texture->h * 0.5f * scale;
     SDL_FRect destination{centreX - width * 0.5f, centreY - height * 0.5f, width, height};
     if (shadow) {
         SDL_SetTextureColorMod(texture, 70, 32, 14);
@@ -318,10 +414,20 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
                 const std::string& message, const RunResult* result, std::int64_t coinBank,
                 const UpgradeManager* upgrades, const SkinManager* skins, const EnvironmentManager* environments) const
 {
+    const double exitProgress = closing ? exitTime / exitDuration : 0.0;
+    const float opacity = static_cast<float>(1.0 - exitProgress * exitProgress);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer, 16, 32, 48, 135);
+    SDL_SetRenderDrawColor(renderer, 16, 32, 48,
+                          static_cast<Uint8>(135.0 * std::clamp(entranceTime / 0.18, 0.0, 1.0) * opacity));
     const SDL_FRect backdrop{0, 0, 960, 640};
     SDL_RenderFillRect(renderer, &backdrop);
+    SDL_Texture* previousTarget = SDL_GetRenderTarget(renderer);
+    if (!SDL_SetRenderTarget(renderer, modalTexture.get()) ||
+        !SDL_SetRenderScale(renderer, 2.0f, 2.0f)) {
+        throw std::runtime_error("Menu animation rendering failed: " + std::string(SDL_GetError()));
+    }
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
+    SDL_RenderClear(renderer);
     panel.draw(renderer, view == View::Shop || view == View::Skins || view == View::Environments ? SDL_FRect{50, 20, 860, 600} :
         (view == View::Results ? SDL_FRect{170, 20, 620, 600} : SDL_FRect{220, 30, 520, 580}), 64);
     const SDL_Color ink{77, 42, 23, 255};
@@ -419,7 +525,8 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
     const auto buttons = getButtons(view, hasRun, options, upgrades, coinBank, skins, environments);
     for (std::size_t i = 0; i < buttons.size(); ++i) {
         const auto& button = buttons[i];
-        SDL_FRect bounds = button.bounds;
+        const float scale = buttonScale(i);
+        SDL_FRect bounds = animatedButtonBounds(button, i);
         const bool focused = button.enabled && selected == static_cast<int>(i);
         const bool held = pressed == static_cast<int>(i) && focused;
         if (held) {
@@ -430,7 +537,7 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
         text(button.label, bounds.x + bounds.w * 0.5f, bounds.y + bounds.h * 0.5f - 1,
              view == View::Skins ? (i < skinsPerPage ? 18 : 24) :
              (view == View::Results ? 24 : ((view == View::Shop && i < UpgradeManager::count) || view == View::Environments ? 18 : 30)),
-             button.primary ? white : ink, button.primary);
+             button.primary ? white : ink, button.primary, scale);
         if (focused) {
             if (view == View::Shop || view == View::Skins || view == View::Environments) {
                 SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a);
@@ -443,17 +550,24 @@ void Menu::draw(View view, bool hasRun, const MenuOptions& options,
     }
     if (view == View::Main || view == View::Options) {
         text(view == View::Options ? "" : "Mouse to aim. Release to launch.",
-             480, 548 + (view == View::Options ? 22 : 0), 18, muted);
+             480, 548.0f + (view == View::Options ? 22.0f : 0.0f), 18, muted);
         if (view == View::Main) {
             const std::string area = environments ? std::string(EnvironmentManager::definitions[environments->getSelected()].name) : "Yard";
             text(area + " | Bank: " + std::to_string(coinBank) + " coins", 480, 575, 18, muted);
         }
     }
+    if (!SDL_SetRenderTarget(renderer, previousTarget)) {
+        throw std::runtime_error("Menu animation presentation failed: " + std::string(SDL_GetError()));
+    }
+    const SDL_FRect destination = modalBounds();
+    SDL_SetTextureAlphaMod(modalTexture.get(), static_cast<Uint8>(255.0f * opacity));
+    SDL_RenderTexture(renderer, modalTexture.get(), nullptr, &destination);
+
     const std::string hint = view == View::Environments ? "Selections apply to the next run. Unlocks are permanent." :
         view == View::Skins ? "Skins are cosmetic. Buy once, then equip for free." :
         (view == View::Shop ? "Upgrades apply to your next run" :
                              "Arrow keys / Tab to select  |  Enter to confirm");
     text(message.empty() ? hint : message,
-         480, 627, 18, {255, 249, 228, 255}, true);
+         480, 627, 18, {255, 249, 228, static_cast<Uint8>(255.0f * opacity)}, true);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }

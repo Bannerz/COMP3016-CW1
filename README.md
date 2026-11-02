@@ -9,6 +9,7 @@ upgrades to fly further and earn bigger payouts.
 **Launch → collect coins → earn a payout → upgrade → fly further.**
 
 - Aim and launch the object using a mouse-driven slingshot.
+- Procedural rubber bands follow the pull, thinning and brightening as tension increases.
 - Collect coins during each attempt.
 - Spend coins on upgrades between launches.
 - Use those upgrades to improve future attempts and earn larger payouts.
@@ -29,6 +30,13 @@ upgrades to fly further and earn bigger payouts.
 The main menu offers Play, Shop, Environments, Save / Load, Options and Quit. During a run it
 also offers Resume and End run. Options controls fullscreen, VSync and anti-aliasing; changes
 apply immediately for the current session.
+
+Menu panels pop in with a short bounce, followed by staggered button bounces.
+The animation also plays when reopening a menu or changing skin pages, and mouse
+hit areas follow the moving buttons.
+Closing a menu gives it a small anticipation bounce before it shrinks and fades
+away over 0.22 seconds. Navigation, Resume, Play and Quit complete after the close;
+repeated input during the transition is ignored. Purchases and option toggles remain immediate.
 
 The HUD tracks your furthest horizontal distance from the launcher, current
 height above the ground and highest altitude this run, all in metres. Measurements
@@ -92,6 +100,10 @@ apply on your next run, so shopping while paused does not change the current run
 | Lucky Loot | Higher relative chances of 2 and 3 value coins | 30 coins |
 | Glider | 6% less gravity | 40 coins |
 | Air Boost | One extra Up-arrow boost per run | 50 coins |
+
+Bands have a distinct colour and increasing thickness at each level: tan at level 0,
+green at 1, cyan at 2, blue at 3, violet at 4 and gold at 5. Their visual style applies
+on the next run along with the increased pull distance.
 
 Air boosts add upward speed while keeping horizontal motion. Charges refill
 on a new run. The HUD shows the charges remaining.

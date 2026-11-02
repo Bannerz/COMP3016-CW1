@@ -40,6 +40,8 @@ public:
               const SkinManager* skins = nullptr,
               const EnvironmentManager* environments = nullptr) const;
     void resetInput();
+    Action update(double elapsed);
+    void close(Action action);
     std::size_t getSkinId(Action action) const;
 
 private:
@@ -69,13 +71,17 @@ private:
     std::size_t firstSkin() const;
     std::size_t skinPageCount() const;
     void text(const std::string& value, float centreX, float centreY, int size,
-              SDL_Color colour, bool shadow = false) const;
+              SDL_Color colour, bool shadow = false, float scale = 1.0f) const;
+    SDL_FRect modalBounds() const;
+    float buttonScale(std::size_t index) const;
+    SDL_FRect animatedButtonBounds(const Button& button, std::size_t index) const;
 
     SDL_Renderer* renderer;
     NineSlice panel;
     NineSlice primaryButton;
     NineSlice secondaryButton;
     NineSlice card;
+    TexturePtr modalTexture{nullptr, SDL_DestroyTexture};
     std::vector<TexturePtr> upgradeIcons;
     std::vector<TexturePtr> skinSheets;
     std::map<int, FontPtr> fonts;
@@ -84,5 +90,11 @@ private:
     int pressed = -1;
     std::size_t skinPage = 0;
     bool premiumSkins = false;
+    double entranceTime = 0.0;
+    double exitTime = 0.0;
+    bool closing = false;
+    Action pendingAction = Action::None;
+    SDL_FRect exitStartBounds{};
+    static constexpr double exitDuration = 0.22;
     static constexpr std::size_t skinsPerPage = 8;
 };
