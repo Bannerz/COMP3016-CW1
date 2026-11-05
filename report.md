@@ -479,8 +479,24 @@ were procedurally synthesised using the project's AI-assisted
 The [asset provenance table](README.md#asset-provenance-and-licences) consolidates
 these sources and links to the bundled font licences.
 
-**Packaged executable instructions:** Pending final Windows release filename,
-required runtime components, asset-folder layout and launch instructions.
+### Packaged Windows executable
+
+**Release V1:** [Protolaunch Release V1.zip](Protolaunch%20Release%20V1.zip), 80,627,405 bytes
+(76.9 MiB). The archive is recorded in commit
+[`f996ea9` — Add Protolaunch V1 release archive](https://github.com/Bannerz/COMP3016-CW1/commit/f996ea98c093ab36e3f3634c32fe3de79af0b9f6).
+
+Extract the entire ZIP, open `Protolaunch Release V1` and run `game.exe`. Keep
+`assets` beside the executable; it contains the images, audio, fonts and font
+licences. Visual Studio and CMake are not required to play. The 64-bit executable
+imports the Microsoft Visual C++ v14 runtime, including `MSVCP140.dll`,
+`VCRUNTIME140.dll` and `VCRUNTIME140_1.dll`. A machine without that runtime needs
+the x64 Redistributable from
+[Microsoft's official download page](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) (Microsoft, 2026).
+
+The download is a playable release package. 
+
+**Archive SHA-256:** `52379617672484ffb8a2f0f5109204c4507c5df5657c1be6749cfa3dfb037123`.
+
 
 ## 6. Development workflow and refinement
 
@@ -584,7 +600,7 @@ Completed executions and observations are documented separately from the plan.
 
 | Area | Current evidence | Results / supporting reference |
 | --- | --- | --- |
-| Windows portability | Developer tested on Windows 10 using Visual Studio Professional 2022 on 1 November 2026. Compilation and execution succeeded; Release compiled without errors and ran outside Visual Studio. | WIN-01 below. Exact tested commit and hardware were not recorded; final-build and SMB102 verification remain outstanding. |
+| Windows portability | Developer tested on Windows 10 using Visual Studio Professional 2022 on 1 November 2026. Compilation and execution succeeded; Release compiled without errors and ran outside Visual Studio. | [WIN-01](#win-01) records the earlier build; [WIN-02](#win-02) confirms extracted Release V1 execution. SMB102 testing is not documented. |
 | Automated persistence and balance checks | `tests/ProgressStoreTests.cpp` covers persistence/failure cases; `tests/BalanceTests.cpp` covers repeat bounces, payouts and environment settings. | AI-run macOS CTest passed 2/2 on 4 November 2026; see the final balance refinement below. |
 | Unexpected input and menu transitions | Developer-run launcher checks passed, including empty-space input and drag cancellation. | Session DEV-01 below; wider input/transition cases remain planned. |
 | Physics and streaming | Developer observed no unexpected seam bounces across multiple ground chunks; loss of rolling spin was reproduced. | DEV-04 below; BALL-01 is retained as an accepted known limitation in DEV-15. |
@@ -608,8 +624,29 @@ Completed executions and observations are documented separately from the plan.
 
 The exact tested commit and hardware were not recorded. This confirms Windows
 build/run and standalone execution for the version tested on 1 November; it does
-not verify subsequent changes. A final-version Windows check and SMB102 testing
-remain outstanding.
+not verify subsequent changes. [WIN-02](#win-02) records the later Release V1
+archive check. SMB102 testing is not documented.
+
+<a id="win-02"></a>
+
+### Release V1 extracted-package execution WIN-02 — confirmed 5 November 2026
+
+**Tester:** Alex Banfield (developer)<br>
+**Package:** [Protolaunch Release V1.zip](Protolaunch%20Release%20V1.zip)<br>
+**Repository evidence:** archive commit [`f996ea9`](https://github.com/Bannerz/COMP3016-CW1/commit/f996ea98c093ab36e3f3634c32fe3de79af0b9f6)<br>
+**Evidence:** developer confirmation for this exact extracted ZIP; archive/PE inspection
+
+| Check | Actual observation | Result |
+| --- | --- | --- |
+| Compile and package the Windows executable. | Developer supplied the compiled Release V1 archive. Inspection identifies `game.exe` as a Windows x64 PE executable. | Build supplied; architecture verified |
+| Extract the archive and launch outside Visual Studio. | Developer confirmed that `game.exe` launches and runs successfully after extracting this exact ZIP on Windows. | Pass |
+| Check archive contents and integrity. | ZIP integrity passed; `assets` is adjacent to `game.exe` and includes both font licences. | Pass — archive inspection |
+
+This records successful standalone execution on the developer's Windows system,
+not a clean-machine dependency test or an SMB102 result. The runtime DLLs are not
+bundled; the Visual C++ x64 runtime is a prerequisite. The source snapshot is
+identified separately at the top of the report; the archive commit identifies
+the exact packaged binary without assuming its compilation source hash.
 
 ### Exception and failure handling
 
@@ -1195,15 +1232,18 @@ extensions, subject to their value to the core launch-and-upgrade loop.
 - Signed Generative AI Declaration: [signed Generative AI Declaration](Generative%20AI%20Tool%20declaration.pdf).
 - Asset sources and font licences: [asset provenance](README.md#asset-provenance-and-licences).
 - Dependency approval: Chin, Ji-Jian (2026). Email to Alex Banfield granting permission to use Box2D, 27 October, 02:43. Personal communication; email retained by the author.
-- Test evidence: [testing summary](#8-testing-robustness-and-performance), [Windows WIN-01](#win-01), [developer sessions DEV-01 onwards](#dev-01), [endurance DEV-14](#dev-14) and [final acceptance DEV-15](#dev-15).
+- Test evidence: [testing summary](#8-testing-robustness-and-performance), [Windows WIN-01](#win-01), [Release V1 WIN-02](#win-02), [developer sessions DEV-01 onwards](#dev-01), [endurance DEV-14](#dev-14) and [final acceptance DEV-15](#dev-15).
 - Automated verification: [recorded 2/2 CTest result](#final-balance), [persistence test source](tests/ProgressStoreTests.cpp) and [balance test source](tests/BalanceTests.cpp).
 - Issue and visual evidence: [ground-seam regression and BALL-01](#dev-04), [launcher before/after comparison](#launcher-01), [preferences verification](#preferences-verification) and [comet captures](#comet-refinement).
 - Relayed player feedback and reflection: [Section 9](#9-external-playtesting-and-reflection). Participant/session detail limitations are stated there.
 - Repository evidence: [milestone commits](#6-development-workflow-and-refinement) and [refinement snapshot reference](#refinement-snapshot).
 - Technical documentation and programming-pattern sources: listed below.
-- Demonstration video and final release/version: pending links.
+- Windows release: [Release V1 ZIP](Protolaunch%20Release%20V1.zip), [archive commit `f996ea9`](https://github.com/Bannerz/COMP3016-CW1/commit/f996ea98c093ab36e3f3634c32fe3de79af0b9f6) and [launch instructions](#packaged-windows-executable).
+- Demonstration video: link to be added after recording.
 
 ### Technical documentation
+
+Microsoft (2026) ‘Microsoft Visual C++ Redistributable latest supported downloads’, *Microsoft Learn*. Available at: [Microsoft Learn](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) (Accessed: 5 November 2026).
 
 Catto, E. and Box2D contributors (n.d.a) ‘Collision’, *Box2D 3.1.1 documentation*. Available at: [https://github.com/erincatto/box2d/blob/v3.1.1/docs/collision.md](https://github.com/erincatto/box2d/blob/v3.1.1/docs/collision.md) (Accessed: 4 November 2026).
 

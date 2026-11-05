@@ -407,6 +407,22 @@ recorded.
 
 C++20, SDL 3.2.28, SDL_image 3.2.4, SDL_ttf 3.2.2, Box2D 3.1.1, CMake, and VS Code.
 
+## Windows release download
+
+Download [Protolaunch Release V1](Protolaunch%20Release%20V1.zip) (76.9 MiB), then:
+
+1. Extract the ZIP completely.
+2. Open the extracted `Protolaunch Release V1` folder.
+3. Run `game.exe`, keeping the `assets` folder beside it.
+
+Visual Studio and CMake are not needed to play the packaged build. The executable
+requires the **Microsoft Visual C++ v14 x64 runtime**. If Windows reports missing
+`MSVCP140.dll` or `VCRUNTIME140.dll`, install the x64 Redistributable from
+[Microsoft's official download page](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
+
+I have confirmed that this exact archive was extracted on Windows and
+`game.exe` launched and ran successfully outside Visual Studio.
+
 ## Build and run
 
 CMake downloads SDL3, its image/font libraries and Box2D automatically. The first build requires internet access.
