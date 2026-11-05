@@ -4,7 +4,7 @@
 **Module:** COMP3016 — Immersive Game Technologies  
 **Repository:** [Bannerz/COMP3016-CW1](https://github.com/Bannerz/COMP3016-CW1)  
 **Demonstration video:** 
-**Submission version / commit:** 
+**Submission version / commit:** [`ed1c731`](https://github.com/Bannerz/COMP3016-CW1/commit/ed1c73131b53481072db08b8c81e6cd716592d92) — source snapshot, 5 November 2026.
 
 ## 1. Project overview
 
@@ -493,6 +493,7 @@ required runtime components, asset-folder layout and launch instructions.
 | [`dacfce1`](https://github.com/Bannerz/COMP3016-CW1/commit/dacfce180730110235eda555433f17ab44d55bc7) — 31 October 2026 | Progression, menus and upgrades. |
 | [`63cf767`](https://github.com/Bannerz/COMP3016-CW1/commit/63cf767f0b6f7fc789371ee2ce1821fd61944373) — 2 November 2026 | Visual polish. |
 | [`bd427c4`](https://github.com/Bannerz/COMP3016-CW1/commit/bd427c47c2c99e0adffd4c10f402fefe2cd2078e) — 2 November 2026 | Audio, save dialogs and progress tests. |
+| [`ed1c731`](https://github.com/Bannerz/COMP3016-CW1/commit/ed1c73131b53481072db08b8c81e6cd716592d92) — 5 November 2026 | Environment tuning, persistent preferences, stars, launcher/comet refinements, balance changes, regression tests and supporting documentation. |
 
 ### Implementation dates for referenced APIs and approaches
 
@@ -519,9 +520,17 @@ the evidence below.
 
 <a id="refinement-snapshot"></a>
 
-**Refinement snapshot commit:** to be added after the first snapshot commit.
-This reference will identify the source and evidence recorded by the current
-report; the submission version at the top will identify the final delivered build.
+**Refinement snapshot commit:** [`ed1c731` — Add progression, preferences, and balance updates](https://github.com/Bannerz/COMP3016-CW1/commit/ed1c73131b53481072db08b8c81e6cd716592d92), 5 November 2026.
+This snapshot records the implementation and supporting evidence described here.
+The following links identify the committed versions of the principal refinements:
+
+- Launcher attachment correction: [launcher source](https://github.com/Bannerz/COMP3016-CW1/blob/ed1c73131b53481072db08b8c81e6cd716592d92/src/Launcher.cpp).
+- Speed/comet feedback: [flame source](https://github.com/Bannerz/COMP3016-CW1/blob/ed1c73131b53481072db08b8c81e6cd716592d92/src/SpeedFlame.cpp).
+- Shorter runs and reduced payouts: [trampoline logic](https://github.com/Bannerz/COMP3016-CW1/blob/ed1c73131b53481072db08b8c81e6cd716592d92/src/TrampolineManager.cpp), [environment tuning](https://github.com/Bannerz/COMP3016-CW1/blob/ed1c73131b53481072db08b8c81e6cd716592d92/src/EnvironmentSettings.cpp) and [reward calculation](https://github.com/Bannerz/COMP3016-CW1/blob/ed1c73131b53481072db08b8c81e6cd716592d92/src/RunResult.h).
+- Automated balance checks: [test source](https://github.com/Bannerz/COMP3016-CW1/blob/ed1c73131b53481072db08b8c81e6cd716592d92/tests/BalanceTests.cpp).
+
+Release packaging and final Windows verification are recorded separately from
+this source snapshot.
 
 **Refinement case study — ground seams:** unexpected upward bounces during long
 rolls led to continuous chain contact geometry with ghost vertices. The
@@ -557,8 +566,8 @@ evidence. They summarise the requests rather than reproduce verbatim prompts.
 | Add a trajectory-aligned flame to communicate speed, then wrap its leading edge around the ball and scale it with speed. | The first version communicated speed, but my screenshot feedback led to a forward head offset and smoothed, bounded opacity/size. | [Comet refinement](#comet-refinement): eight-direction and capped-growth captures; [source](src/SpeedFlame.cpp), [AI-23](AI_DEVELOPMENT_LOG.md#ai-23--speed-feedback-flame) and [AI-24](AI_DEVELOPMENT_LOG.md#ai-24--comet-envelope-and-speed-based-growth). |
 | Reduce excessively long runs and lower payouts. | Initial scarcity was followed by earlier thinning, weaker repeat bounces, increased ground resistance and lower reward multipliers. Starting launch and upgrade prices were retained. | [Balance tests](tests/BalanceTests.cpp), [2/2 CTest result and tuning](#final-balance), [final developer acceptance](#dev-15); [AI-25](AI_DEVELOPMENT_LOG.md#ai-25--distance-based-resource-scarcity) and [AI-26](AI_DEVELOPMENT_LOG.md#ai-26--shorter-runs-and-lower-payouts). |
 
-The [refinement snapshot reference](#refinement-snapshot) will connect these
-examples to their commit. The [milestone history](#6-development-workflow-and-refinement)
+The [refinement snapshot reference](#refinement-snapshot) connects these
+examples to commit [`ed1c731`](https://github.com/Bannerz/COMP3016-CW1/commit/ed1c73131b53481072db08b8c81e6cd716592d92). The [milestone history](#6-development-workflow-and-refinement)
 provides earlier repository evidence; the complete
 [AI development log](AI_DEVELOPMENT_LOG.md) records the wider contribution history.
 
