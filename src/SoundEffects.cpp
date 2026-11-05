@@ -100,10 +100,14 @@ bool SoundEffects::isMusicPlaying() const
     });
 }
 
-void SoundEffects::setVolumes(float music, float effects)
+void SoundEffects::setVolumes(float music, float effects, bool immediate)
 {
     targetMusicGain = std::clamp(music, 0.0f, 1.0f);
     targetEffectsGain = std::clamp(effects, 0.0f, 1.0f);
+    if (immediate) {
+        musicGain = targetMusicGain;
+        effectsGain = targetEffectsGain;
+    }
 }
 
 void SoundEffects::update()

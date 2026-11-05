@@ -13,6 +13,9 @@ struct BackgroundSettings {
     float darkeningEndHeight = 14000.0f;
     float mountainParallax = 0.12f;
     float cloudParallax = 0.23f;
+    SDL_Color starColour = {225, 236, 255, 255};
+    Uint32 starSeed = 1;
+    float starParallax = 0.035f;
 };
 
 //draw scenery behind the game without changing physics or world positions
@@ -36,6 +39,7 @@ public:
 
 private:
     float getAltitudeBlend(float ballY) const;
+    void drawStars(SDL_Renderer* renderer, const Camera& camera, float ballY) const;
     void drawMountains(SDL_Renderer* renderer, const Camera& camera) const;
     void drawClouds(SDL_Renderer* renderer, const Camera& camera, float ballY) const;
 

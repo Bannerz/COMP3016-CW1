@@ -1,8 +1,10 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include "SpawnDensity.h"
 #include <array>
 #include <map>
+#include <optional>
 #include <random>
 #include <set>
 #include <tuple>
@@ -18,9 +20,11 @@ public:
 
     //textures are ordered by value: 1, 2 and 3, and are owned by Game
     CoinManager(std::array<SDL_Texture*, 3> textures, float floorY, float firstCoinX,
-                std::array<double, 3> valueWeights = {60.0, 28.0, 12.0});
+                std::array<double, 3> valueWeights = {60.0, 28.0, 12.0},
+                SpawnDensitySettings density = {}, float pixelsPerMetre = 40.0f);
 
-    void startRun(float startX, float startY);
+    //an optional seed supports repeatable checks; normal runs get a fresh random layout
+    void startRun(float startX, float startY, std::optional<unsigned int> fixedSeed = std::nullopt);
     void update(float ballX, float ballY);
     //collection and the run total use coin values, not the number of objects
     int collect(float ballX, float ballY, float ballRadius, float extraReach = 0.0f);
@@ -50,6 +54,9 @@ private:
     std::array<double, 3> valueWeights;
     float floorY;
     float firstCoinX;
+    SpawnDensitySettings density;
+    float pixelsPerMetre;
+    float runStartX = 0;
 
     static constexpr float coinSize = 32.0f;
     static constexpr float coinRadius = coinSize * 0.5f;

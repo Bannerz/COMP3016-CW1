@@ -8,9 +8,12 @@
 #include <stdexcept>
 
 CoinManager::CoinManager(std::array<SDL_Texture*, 3> textures, float floorY, float firstCoinX,
-                         std::array<double, 3> valueWeights)
-    : textures(textures), valueWeights(valueWeights), floorY(floorY), firstCoinX(firstCoinX)
+                         std::array<double, 3> valueWeights, SpawnDensitySettings density, float pixelsPerMetre)
+    : textures(textures), valueWeights(valueWeights), floorY(floorY), firstCoinX(firstCoinX),
+      density(density), pixelsPerMetre(pixelsPerMetre)
 {
+    if (!density.valid() || !std::isfinite(pixelsPerMetre) || pixelsPerMetre <= 0)
+        throw std::invalid_argument("Invalid coin density or world scale");
     setValueWeights(valueWeights);
 }
 
@@ -26,13 +29,15 @@ void CoinManager::setValueWeights(std::array<double, 3> weights)
     valueWeights = weights;
 }
 
-void CoinManager::startRun(float startX, float startY)
+void CoinManager::startRun(float startX, float startY, std::optional<unsigned int> fixedSeed)
 {
+    runStartX = startX;
     //start each attempt with a fresh layout and pickup history
     const unsigned int previousSeed = runSeed;
-    do {
-        runSeed = seed();
-    } while (runSeed == previousSeed);
+    if (fixedSeed) runSeed = *fixedSeed;
+    else {
+        do { runSeed = seed(); } while (runSeed == previousSeed);
+    }
 
     chunks.clear();
     collectedCoins.clear();
@@ -77,6 +82,11 @@ void CoinManager::update(float worldX, float worldY)
                 static_cast<unsigned int>(chunkY), 0xc01f01u
             };
             std::mt19937 valueRandom(valueSeed);
+            //independent retention samples keep original positions and coin values stable
+            std::seed_seq densitySeed{runSeed, static_cast<unsigned int>(chunkX),
+                                      static_cast<unsigned int>(chunkY), 0xd31517u};
+            std::mt19937 densityRandom(densitySeed);
+            std::uniform_real_distribution<float> sample(0.0f, 1.0f);
             std::discrete_distribution<int> coinType(valueWeights.begin(), valueWeights.end());
             std::uniform_real_distribution<float> randomX(
                 48.0f, chunkWidth - 48.0f
@@ -94,8 +104,10 @@ void CoinManager::update(float worldX, float worldY)
                     chunkY * chunkHeight + randomHeight(chunkRandom)
                 );
 
-                //leave the launcher area clear
-                if (x < firstCoinX) {
+                const float keep = sample(densityRandom);
+                const float distance = std::max(0.0f, (x - runStartX) / pixelsPerMetre);
+                //leave the launcher area clear, then thin later regions deterministically
+                if (x < firstCoinX || keep >= density.atDistance(distance)) {
                     continue;
                 }
 

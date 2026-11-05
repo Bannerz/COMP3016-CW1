@@ -49,7 +49,8 @@ Background::Background(SDL_Texture* mountains, SDL_Texture* clouds, float floorY
     if (settings.darkeningStartHeight < 0.0f ||
         settings.darkeningEndHeight <= settings.darkeningStartHeight ||
         settings.mountainParallax < 0.0f || settings.mountainParallax > 1.0f ||
-        settings.cloudParallax < 0.0f || settings.cloudParallax > 1.0f) {
+        settings.cloudParallax < 0.0f || settings.cloudParallax > 1.0f ||
+        !std::isfinite(settings.starParallax) || settings.starParallax < 0.0f || settings.starParallax > 1.0f) {
         throw std::invalid_argument("Invalid background altitude or parallax settings");
     }
 
@@ -87,6 +88,58 @@ SDL_Color Background::getSkyColor(float ballY) const
     return {mix(settings.skyAtGround.r, settings.skyAtAltitude.r),
             mix(settings.skyAtGround.g, settings.skyAtAltitude.g),
             mix(settings.skyAtGround.b, settings.skyAtAltitude.b), 255};
+}
+
+void Background::drawStars(SDL_Renderer* renderer, const Camera& camera, float ballY) const
+{
+    //use the same altitude blend as the sky so stars fade back out on descent
+    const float visibility = std::clamp((getAltitudeBlend(ballY) - 0.12f) / 0.88f, 0.0f, 1.0f);
+    if (visibility <= 0.0f) return;
+    const float fade = visibility * visibility * (3.0f - 2.0f * visibility);
+    constexpr float regionWidth = 240.0f;
+    constexpr float regionHeight = 200.0f;
+    constexpr float margin = 6.0f;
+    const float cameraX = camera.getX() * settings.starParallax;
+    const float cameraY = camera.getY() * settings.starParallax;
+    const int firstColumn = static_cast<int>(std::floor((cameraX - margin) / regionWidth));
+    const int lastColumn = static_cast<int>(std::floor((cameraX + camera.getWidth() + margin) / regionWidth));
+    const int firstRow = static_cast<int>(std::floor((cameraY - margin) / regionHeight));
+    const int lastRow = static_cast<int>(std::floor((cameraY + camera.getHeight() + margin) / regionHeight));
+    SDL_BlendMode previousBlend;
+    SDL_GetRenderDrawBlendMode(renderer, &previousBlend);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    for (int row = firstRow; row <= lastRow; ++row) {
+        for (int column = firstColumn; column <= lastColumn; ++column) {
+            //hash world regions instead of generating new random positions each frame
+            const Uint32 regionSalt = settings.starSeed * 131u + 0x57a2u;
+            const int count = 3 + static_cast<int>(cloudHash(column, row, regionSalt) % 4u);
+            for (int slot = 0; slot < count; ++slot) {
+                const Uint32 salt = regionSalt + static_cast<Uint32>(slot + 1) * 17u;
+                const float x = (column + cloudSample(column, row, salt)) * regionWidth - cameraX;
+                const float y = (row + cloudSample(column, row, salt + 1)) * regionHeight - cameraY;
+                if (x < -margin || y < -margin || x > camera.getWidth() + margin ||
+                    y > camera.getHeight() + margin) continue;
+                const float brightness = cloudSample(column, row, salt + 2);
+                const bool bright = brightness > 0.86f;
+                const float size = bright ? 2.2f : 1.0f + brightness * 0.7f;
+                const auto alpha = static_cast<Uint8>(settings.starColour.a * fade * (0.35f + brightness * 0.65f));
+                const auto& colour = settings.starColour;
+                if (bright) {
+                    //a faint halo and short cross give only the brightest stars extra detail
+                    SDL_SetRenderDrawColor(renderer, colour.r, colour.g, colour.b, alpha / 9);
+                    const SDL_FRect halo{x - 3.0f, y - 3.0f, 6.0f, 6.0f};
+                    SDL_RenderFillRect(renderer, &halo);
+                    SDL_SetRenderDrawColor(renderer, colour.r, colour.g, colour.b, alpha / 3);
+                    SDL_RenderLine(renderer, x - 3.5f, y, x + 3.5f, y);
+                    SDL_RenderLine(renderer, x, y - 3.5f, x, y + 3.5f);
+                }
+                SDL_SetRenderDrawColor(renderer, colour.r, colour.g, colour.b, alpha);
+                const SDL_FRect star{x - size * 0.5f, y - size * 0.5f, size, size};
+                SDL_RenderFillRect(renderer, &star);
+            }
+        }
+    }
+    SDL_SetRenderDrawBlendMode(renderer, previousBlend);
 }
 
 void Background::drawMountains(SDL_Renderer* renderer, const Camera& camera) const
@@ -189,6 +242,7 @@ void Background::draw(SDL_Renderer* renderer, const Camera& camera, float ballY)
     SDL_SetRenderDrawColor(renderer, sky.r, sky.g, sky.b, sky.a);
     SDL_RenderClear(renderer);
 
+    drawStars(renderer, camera, ballY);
     drawMountains(renderer, camera);
     drawClouds(renderer, camera, ballY);
 }

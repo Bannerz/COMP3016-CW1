@@ -7,12 +7,12 @@
 
 struct RunRewardSettings {
     //each interval adds 1 to its multiplier, up to the cap
-    double distanceInterval = 250.0;
-    double heightInterval = 100.0;
-    double timeInterval = 60.0;
-    double maxDistanceMultiplier = 4.0;
-    double maxHeightMultiplier = 3.0;
-    double maxTimeMultiplier = 2.0;
+    double distanceInterval = 400.0;
+    double heightInterval = 150.0;
+    double timeInterval = 120.0;
+    double maxDistanceMultiplier = 3.0;
+    double maxHeightMultiplier = 2.5;
+    double maxTimeMultiplier = 1.25;
 };
 
 //freeze the payout breakdown when a run ends so it can only be awarded once

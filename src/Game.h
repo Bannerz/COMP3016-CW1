@@ -22,6 +22,7 @@ class Background;
 class TrampolineManager;
 class RewardEffects;
 class SoundEffects;
+class SpeedFlame;
 
 //own the application resources and coordinate the current level
 class Game {
@@ -41,6 +42,7 @@ private:
     using WindowPtr = std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)>;
 
     void initialize();
+    void loadPreferences();
     void createSceneTexture(bool antiAliasing);
     void applyMenuAction(Menu::Action action);
     void buyUpgrade(UpgradeId id);
@@ -101,6 +103,7 @@ private:
     LevelConfig levelSettings;
     std::string loadedLauncherImage;
     std::filesystem::path progressPath;
+    std::filesystem::path preferencesPath;
     std::filesystem::path lastManualSave;
     std::shared_ptr<ProgressDialog> progressDialog;
 
@@ -110,6 +113,7 @@ private:
     TexturePtr floorTexture{nullptr, SDL_DestroyTexture};
     TexturePtr launcherTexture{nullptr, SDL_DestroyTexture};
     TexturePtr ballTexture{nullptr, SDL_DestroyTexture};
+    TexturePtr flameTexture{nullptr, SDL_DestroyTexture};
     TexturePtr premiumBallTexture{nullptr, SDL_DestroyTexture};
     std::array<TexturePtr, 3> coinTextures = {
         TexturePtr{nullptr, SDL_DestroyTexture},
@@ -128,6 +132,7 @@ private:
     b2WorldId physicsWorld = b2_nullWorldId;
     Camera camera;
     std::unique_ptr<Ball> ball;
+    std::unique_ptr<SpeedFlame> speedFlame;
     std::unique_ptr<Launcher> launcher;
     std::unique_ptr<CoinManager> coins;
     std::unique_ptr<GroundManager> ground;

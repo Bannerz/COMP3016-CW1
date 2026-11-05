@@ -22,6 +22,22 @@ constexpr std::array<BandStyle, 6> bandStyles = {{
     {{1.00f, 0.76f, 0.12f, 1.0f}, 11.0f} //gold
 }};
 
+struct ForkAttachments {
+    SDL_FPoint left;
+    SDL_FPoint right;
+};
+
+//normalised centres of the metal fork collars in each equipped launcher image
+//launcher upgrades change these points independently of band colour and thickness
+constexpr std::array<ForkAttachments, 6> forkAttachments = {{
+    {{0.19f, 0.145f}, {0.81f, 0.145f}}, //level 00
+    {{0.18f, 0.145f}, {0.82f, 0.145f}}, //level 01
+    {{0.233f, 0.105f}, {0.754f, 0.105f}}, //level 02
+    {{0.243f, 0.102f}, {0.750f, 0.102f}}, //level 03
+    {{0.284f, 0.074f}, {0.709f, 0.074f}}, //level 04
+    {{0.177f, 0.143f}, {0.827f, 0.133f}} //level 05-fixed
+}};
+
 //A curved ribbon gives the rubber a little slack at rest, becoming taut under load.
 void drawBand(SDL_Renderer* renderer, SDL_FPoint start, SDL_FPoint end,
               float width, float slack, SDL_FColor colour)
@@ -69,13 +85,14 @@ SDL_FPoint Launcher::getAnchor() const
     return {position.x + anchorOffset.x, position.y + anchorOffset.y};
 }
 
-void Launcher::configure(SDL_Texture* sprite, float power, float pullDistance, int level)
+void Launcher::configure(SDL_Texture* sprite, float power, float pullDistance, int bandUpgrade, int launcherUpgrade)
 {
     //apply purchased equipment before a new attempt starts
     texture = sprite;
     launchPower = power;
     maxDragDistance = pullDistance;
-    bandsLevel = std::clamp(level, 0, static_cast<int>(bandStyles.size()) - 1);
+    bandsLevel = std::clamp(bandUpgrade, 0, static_cast<int>(bandStyles.size()) - 1);
+    launcherLevel = std::clamp(launcherUpgrade, 0, static_cast<int>(forkAttachments.size()) - 1);
 }
 
 SDL_FPoint Launcher::clampPull(SDL_FPoint mousePosition) const
@@ -152,10 +169,11 @@ void Launcher::draw(SDL_Renderer* renderer, const Camera& camera, const Ball& ba
                                style.colour.b * 0.28f, 1.0f};
     const SDL_FColor highlight = lighten(rubber, 0.45f);
     const SDL_FPoint end = camera.worldToScreen(pouch.x, pouch.y);
-    //Normalised fork positions keep the bands attached across launcher upgrades.
-    for (const float forkX : {0.18f, 0.82f}) {
-        const SDL_FPoint start = camera.worldToScreen(position.x + size.x * forkX,
-                                                     position.y + size.y * 0.15f);
+    //use the equipped launchers collar positions, rather than one set for all artwork
+    const auto& forks = forkAttachments[static_cast<std::size_t>(launcherLevel)];
+    for (const SDL_FPoint fork : {forks.left, forks.right}) {
+        const SDL_FPoint start = camera.worldToScreen(position.x + size.x * fork.x,
+                                                     position.y + size.y * fork.y);
         drawBand(renderer, start, end, width + 2.0f, slack, outline);
         drawBand(renderer, start, end, width, slack, rubber);
         drawBand(renderer, start, end, width * 0.25f, slack, highlight);

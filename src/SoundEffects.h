@@ -19,7 +19,7 @@ public:
     void reset();
     void setMusic(Music music);
     bool isMusicPlaying() const;
-    void setVolumes(float music, float effects);
+    void setVolumes(float music, float effects, bool immediate = false);
 
 private:
     struct Voice {

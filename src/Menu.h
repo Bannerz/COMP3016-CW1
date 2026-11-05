@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RunResult.h"
+#include "Preferences.h"
 #include "EnvironmentManager.h"
 #include "UpgradeManager.h"
 #include "SkinManager.h"
@@ -10,14 +11,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
-struct MenuOptions {
-    bool fullscreen = false;
-    bool vsync = false;
-    bool antiAliasing = true;
-    int musicVolume = 100;
-    int effectsVolume = 100;
-};
 
 //draw the menus from reusable slices and keep menu input away from the launcher
 class Menu {

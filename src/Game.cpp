@@ -6,8 +6,10 @@
 #include "Background.h"
 #include "TrampolineManager.h"
 #include "ProgressStore.h"
+#include "PreferencesStore.h"
 #include "RewardEffects.h"
 #include "SoundEffects.h"
+#include "SpeedFlame.h"
 
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
@@ -63,6 +65,7 @@ void Game::initialize()
         throw std::runtime_error("Font initialization failed: " + std::string(SDL_GetError()));
     }
     fontsReady = true;
+    loadPreferences();
 
     SDL_Window* newWindow = nullptr;
     SDL_Renderer* newRenderer = nullptr;
@@ -90,7 +93,33 @@ void Game::initialize()
     menu = std::make_unique<Menu>(renderer.get(), std::string(basePath) + "assets/");
     rewardEffects = std::make_unique<RewardEffects>(renderer.get(), std::string(basePath) + "assets/");
     sounds = std::make_unique<SoundEffects>(std::string(basePath) + "assets/");
-    options.vsync = SDL_SetRenderVSync(renderer.get(), 1);
+    //apply saved audio levels before the first mixed buffer, including a saved mute
+    sounds->setVolumes(options.musicVolume / 100.0f, options.effectsVolume / 100.0f, true);
+    if (options.fullscreen && !SDL_SetWindowFullscreen(window.get(), true)) {
+        options.fullscreen = false;
+        menuMessage = "Saved fullscreen setting is unavailable on this display.";
+    }
+    if (!SDL_SetRenderVSync(renderer.get(), options.vsync ? 1 : 0)) {
+        int actual = 0;
+        SDL_GetRenderVSync(renderer.get(), &actual);
+        options.vsync = actual != 0;
+        menuMessage = "Saved VSync setting is unavailable with this renderer.";
+    }
+}
+
+void Game::loadPreferences()
+{
+    using PathPtr = std::unique_ptr<char, decltype(&SDL_free)>;
+    PathPtr directory(SDL_GetPrefPath("Protolaunch", "Protolaunch"), SDL_free);
+    if (!directory) {
+        menuMessage = "Preferences storage is unavailable; using defaults.";
+        return;
+    }
+    const std::string text(directory.get());
+    preferencesPath = std::filesystem::path(std::u8string(text.begin(), text.end())) / "preferences.dat";
+    if (PreferencesStore::load(preferencesPath, options) == PreferencesStore::Load::Invalid) {
+        menuMessage = "Preferences could not be read; using defaults.";
+    }
 }
 
 Game::TexturePtr Game::loadTexture(const std::string& filename)
@@ -137,6 +166,8 @@ void Game::loadLevel(const LevelConfig& settings)
     launcherTexture = loadTexture(settings.launcherImage);
     loadedLauncherImage = settings.launcherImage;
     ballTexture = loadTexture(settings.ballImage);
+    flameTexture = loadTexture(settings.flameImage);
+    speedFlame = std::make_unique<SpeedFlame>(flameTexture.get(), settings.speedFlame);
     premiumBallTexture = loadTexture(settings.premiumBallImage);
     for (std::size_t i = 0; i < coinTextures.size(); ++i) {
         coinTextures[i] = loadTexture(settings.coinImages[i]);
@@ -170,12 +201,12 @@ void Game::loadLevel(const LevelConfig& settings)
         coinTextures[0].get(), coinTextures[1].get(), coinTextures[2].get()
     };
     coins = std::make_unique<CoinManager>(coinSprites, floorY, anchor.x + 250.0f,
-                                         settings.coinValueWeights);
+                                         settings.coinValueWeights, settings.coinDensity, pixelsPerMetre);
     const std::array<SDL_Texture*, 3> trampolineSprites = {
         trampolineTextures[0].get(), trampolineTextures[1].get(), trampolineTextures[2].get()
     };
     trampolines = std::make_unique<TrampolineManager>(trampolineSprites, floorY,
-        anchor.x + 400.0f, settings.trampolines);
+        anchor.x + 400.0f, settings.trampolines, pixelsPerMetre);
     accumulator = 0.0;
     resetRun();
 }
@@ -190,6 +221,7 @@ void Game::unloadLevel()
         SDL_CaptureMouse(false);
     }
     //release objects before the resources they borrow
+    speedFlame.reset();
     ball.reset();
     ground.reset();
     coins.reset();
@@ -209,6 +241,7 @@ void Game::unloadLevel()
     }
     cloudTexture.reset();
     mountainTexture.reset();
+    flameTexture.reset();
     ballTexture.reset();
     premiumBallTexture.reset();
     launcherTexture.reset();
@@ -222,6 +255,7 @@ void Game::resetRun()
     stoppedTime = 0.0;
     accumulator = 0.0;
     ball->reset();
+    speedFlame->reset();
     sounds->reset();
     impactCooldown = 0.0;
     lastAudioPosition = ball->getPosition();
@@ -241,7 +275,7 @@ void Game::resetRun()
     }
     launcher->configure(launcherTexture.get(), levelSettings.launchPower * activeUpgrades.launchMultiplier,
                         levelSettings.maxDragDistance + activeUpgrades.pullBonus,
-                        upgrades.getLevel(UpgradeId::Bands));
+                        upgrades.getLevel(UpgradeId::Bands), upgrades.getLevel(UpgradeId::Launcher));
     auto coinWeights = levelSettings.coinValueWeights;
     for (std::size_t i = 0; i < coinWeights.size(); ++i) {
         coinWeights[i] *= activeUpgrades.coinWeightMultipliers[i];
@@ -594,6 +628,7 @@ void Game::applyMenuAction(Menu::Action action)
     if (action == Menu::Action::None) {
         return;
     }
+    const auto previousOptions = options;
     menuMessage.clear();
     switch (action) {
     case Menu::Action::Play:
@@ -726,6 +761,12 @@ void Game::applyMenuAction(Menu::Action action)
     case Menu::Action::None:
         break;
     }
+    //save successful changes immediately rather than relying on a clean shutdown
+    if (options != previousOptions) {
+        sounds->setVolumes(options.musicVolume / 100.0f, options.effectsVolume / 100.0f);
+        if (!PreferencesStore::save(preferencesPath, options))
+            menuMessage = "Options applied, but preferences could not be saved.";
+    }
     //keep selection on toggles so keyboard users can change them repeatedly
     if (action == Menu::Action::Play || action == Menu::Action::Restart ||
         action == Menu::Action::Options || action == Menu::Action::Back ||
@@ -794,6 +835,7 @@ void Game::update(double elapsed)
             }
             //require a short, continuous rest so ordinary landings do not end the run
             const b2Vec2 velocity = ball->getPhysicsVelocity();
+            speedFlame->update({velocity.x, -velocity.y}, true, static_cast<float>(physicsStep));
             const bool onGround = position.y + ball->getRadius() >= floorY - 2.0f;
             const bool stopped = std::abs(velocity.x) < 0.15f && std::abs(velocity.y) < 0.15f;
             stoppedTime = onGround && stopped ? stoppedTime + physicsStep : 0.0;
@@ -867,6 +909,7 @@ void Game::draw() const
     coins->draw(renderer.get(), camera);
     trampolines->draw(renderer.get(), camera);
     launcher->draw(renderer.get(), camera, *ball);
+    speedFlame->draw(renderer.get(), camera, ball->getPosition(), ball->getRadius());
     ball->draw(renderer.get(), camera);
 
     //downsample the scene, then draw the interface at the window resolution

@@ -20,9 +20,17 @@ float TrampolineManager::Trampoline::getVisualOffset() const
 }
 
 TrampolineManager::TrampolineManager(std::array<SDL_Texture*, 3> textures, float floorY,
-                                     float firstX, TrampolineSettings settings)
-    : textures(textures), settings(settings), floorY(floorY), firstX(firstX)
+                                     float firstX, TrampolineSettings settings, float pixelsPerMetre)
+    : textures(textures), settings(settings), floorY(floorY), firstX(firstX), pixelsPerMetre(pixelsPerMetre)
 {
+    if (!settings.density.valid() || !std::isfinite(pixelsPerMetre) || pixelsPerMetre <= 0)
+        throw std::invalid_argument("Invalid trampoline density or world scale");
+    float previousMultiplier = 1.0f;
+    for (const float multiplier : settings.bounceMultipliers) {
+        if (!std::isfinite(multiplier) || multiplier <= 0.0f || multiplier > previousMultiplier)
+            throw std::invalid_argument("Invalid trampoline bounce multipliers");
+        previousMultiplier = multiplier;
+    }
     double total = 0.0;
     for (const auto& tier : settings.tiers) {
         if (!std::isfinite(tier.width) || tier.width <= 0.0f || tier.width > 400.0f ||
@@ -39,6 +47,7 @@ TrampolineManager::TrampolineManager(std::array<SDL_Texture*, 3> textures, float
 
 void TrampolineManager::startRun(float x, float y, std::optional<unsigned int> seed)
 {
+    runStartX = x;
     //remember the seed so returning to an area keeps the same platforms
     const unsigned int previousSeed = runSeed;
     if (seed) {
@@ -48,7 +57,8 @@ void TrampolineManager::startRun(float x, float y, std::optional<unsigned int> s
         do { runSeed = random(); } while (runSeed == previousSeed);
     }
     chunks.clear();
-    rewarded.clear();
+    generatedChunks.clear();
+    landingCounts.clear();
     update(x, y);
 }
 
@@ -63,21 +73,34 @@ void TrampolineManager::update(float x, float y)
     for (int cx = centreX - 1; cx <= centreX + 1; ++cx) {
         for (int cy = firstY; cy <= centreY + 1; ++cy) {
             const ChunkId id{cx, cy};
-            if (chunks.contains(id)) {
+            if (generatedChunks.contains(id)) {
                 continue;
             }
+            generatedChunks.insert(id);
             std::seed_seq seed{runSeed, static_cast<unsigned int>(cx),
                                static_cast<unsigned int>(cy), 0x7a4d901u};
             std::mt19937 random(seed);
             std::discrete_distribution<int> chooseTier(weights.begin(), weights.end());
             const auto tier = static_cast<std::size_t>(chooseTier(random));
-            //one platform per section, spaced away from the section edges
+            //at most one platform per section, spaced away from its edges
             std::uniform_real_distribution<float> randomX(220.0f, chunkWidth - 220.0f);
             std::uniform_real_distribution<float> randomHeight(100.0f, chunkHeight - 100.0f);
-            chunks.emplace(id, Trampoline{cx * chunkWidth + randomX(random),
-                floorY - (cy * chunkHeight + randomHeight(random)), tier});
+            const float platformX = cx * chunkWidth + randomX(random);
+            const float surfaceY = floorY - (cy * chunkHeight + randomHeight(random));
+            std::seed_seq densitySeed{runSeed, static_cast<unsigned int>(cx),
+                                      static_cast<unsigned int>(cy), 0x7d31517u};
+            std::mt19937 densityRandom(densitySeed);
+            std::uniform_real_distribution<float> sample(0.0f, 1.0f);
+            const float distance = std::max(0.0f, (platformX - runStartX) / pixelsPerMetre);
+            if (sample(densityRandom) < settings.density.atDistance(distance))
+                chunks.emplace(id, Trampoline{platformX, surfaceY, tier});
         }
     }
+    //remember empty regions too, avoiding regeneration on every physics step
+    std::erase_if(generatedChunks, [&](const ChunkId& id) {
+        return id.first < centreX - 1 || id.first > centreX + 1 ||
+               id.second < firstY || id.second > centreY + 1;
+    });
     for (auto it = chunks.begin(); it != chunks.end();) {
         if (it->first.first < centreX - 1 || it->first.first > centreX + 1 ||
             it->first.second < firstY || it->first.second > centreY + 1) {
@@ -122,9 +145,12 @@ std::optional<TrampolineManager::Landing> TrampolineManager::land(
     auto& platform = selected->second;
     //every landing restarts the wobble, even after the reward has been collected
     platform.bounceTime = 0.0f;
-    const int reward = rewarded.insert(selected->first).second ?
-                       settings.tiers[platform.tier].reward : 0;
-    return Landing{{landingX, platform.surfaceY - radius}, settings.bounceSpeed, reward};
+    auto& count = landingCounts[selected->first];
+    const int reward = count == 0 ? settings.tiers[platform.tier].reward : 0;
+    const float upwardSpeed = settings.bounceSpeed * settings.bounceMultipliers[count];
+    //saturate the count so later landings retain the weakest thrust indefinitely
+    count = std::min(count + 1, settings.bounceMultipliers.size() - 1);
+    return Landing{{landingX, platform.surfaceY - radius}, upwardSpeed, reward};
 }
 
 void TrampolineManager::animate(float elapsed)

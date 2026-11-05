@@ -18,6 +18,10 @@ struct EnvironmentDefinition {
     float friction;
     float rollingResistance;
     SDL_Color sky;
+    SDL_Color starColour = {225, 236, 255, 255};
+    Uint32 starSeed = 1;
+    SpawnDensitySettings coinDensity;
+    SpawnDensitySettings trampolineDensity{150.0f, 1200.0f, 0.05f};
 };
 
 //keep each environments records so unlocks remain available when revisiting earlier areas
@@ -26,14 +30,8 @@ public:
     static constexpr std::size_t count = 6;
     struct Record { float distance = 0; float height = 0; };
     using Records = std::array<Record, count>;
-    inline static constexpr std::array<EnvironmentDefinition, count> definitions = {{
-        {"Yard", "yard", "Normal gravity | Firm ground", 0, 0, 9.8f, 0.9f, 0.4f, {135, 206, 235, 255}},
-        {"Coast", "coast", "Lighter gravity | Smooth ground", 250, 60, 8.5f, 0.6f, 0.25f, {104, 208, 224, 255}},
-        {"Peaks", "peaks", "Heavy gravity | Slippery ice", 600, 180, 12.0f, 0.3f, 0.08f, {177, 205, 230, 255}},
-        {"Storm", "storm", "Strong gravity | Grippy ground", 1000, 350, 10.8f, 0.8f, 0.3f, {84, 101, 137, 255}},
-        {"Orbit", "orbit", "Low gravity | Long rolls", 1600, 600, 3.2f, 0.45f, 0.12f, {44, 48, 93, 255}},
-        {"Void", "void", "Light gravity | Slick ground", 2500, 1000, 5.5f, 0.2f, 0.06f, {66, 32, 93, 255}}
-    }};
+    //editable environment values live in EnvironmentSettings.cpp
+    static const std::array<EnvironmentDefinition, count> definitions;
 
     bool isUnlocked(std::size_t id) const
     {
@@ -82,6 +80,10 @@ public:
         level.groundFriction = definition.friction;
         level.groundRollingResistance = definition.rollingResistance;
         level.background.skyAtGround = definition.sky;
+        level.background.starColour = definition.starColour;
+        level.background.starSeed = definition.starSeed;
+        level.coinDensity = definition.coinDensity;
+        level.trampolines.density = definition.trampolineDensity;
         return level;
     }
 

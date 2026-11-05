@@ -57,6 +57,7 @@ FetchContent_MakeAvailable(SDL3 box2d SDL_image SDL_ttf)
 
 add_library(gameplay STATIC
     src/Background.cpp
+    src/SpeedFlame.cpp
     src/Ball.cpp
     src/Launcher.cpp
     src/CoinManager.cpp
@@ -65,6 +66,8 @@ add_library(gameplay STATIC
     src/TrampolineManager.cpp
     src/UpgradeManager.cpp
     src/ProgressStore.cpp
+    src/PreferencesStore.cpp
+    src/EnvironmentSettings.cpp
     src/SkinManager.cpp
 )
 target_include_directories(gameplay PUBLIC src)
@@ -98,4 +101,7 @@ if(BUILD_TESTING)
     add_executable(progress_store_tests tests/ProgressStoreTests.cpp)
     target_link_libraries(progress_store_tests PRIVATE gameplay)
     add_test(NAME progress_store COMMAND progress_store_tests "${CMAKE_CURRENT_BINARY_DIR}/test-saves")
+    add_executable(balance_tests tests/BalanceTests.cpp)
+    target_link_libraries(balance_tests PRIVATE gameplay)
+    add_test(NAME balance COMMAND balance_tests)
 endif()
