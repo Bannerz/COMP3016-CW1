@@ -3,7 +3,7 @@
 **Author:** Alex Banfield  
 **Module:** COMP3016 — Immersive Game Technologies  
 **Repository:** [Bannerz/COMP3016-CW1](https://github.com/Bannerz/COMP3016-CW1)  
-**Demonstration video:** 
+**Demonstration video:** [Watch on YouTube](https://youtu.be/iLoCSkvSo98)<br>
 **Submission version / commit:** [`ed1c731`](https://github.com/Bannerz/COMP3016-CW1/commit/ed1c73131b53481072db08b8c81e6cd716592d92) — source snapshot, 5 November 2026.
 
 ## 1. Project overview
@@ -1155,7 +1155,7 @@ the current version with BALL-01 retained as a known limitation.
 
 *Figure 7 — Environment selection and unlocks. Yard is selected and Coast is available, while later areas display the distance or height required in the preceding environment. Personal records, differing physics descriptions and permanent unlocks are visible.*
 
-**Video:** Pending the final unlisted YouTube link. Coverage includes a functional
+**Video:** [Protolaunch demonstration and code walkthrough](https://youtu.be/iLoCSkvSo98). Coverage includes a functional
 playthrough, the game's distinctive features, code/architecture walkthrough,
 proposal evolution, AI integration and relevant testing/refinement evidence.
 
@@ -1239,7 +1239,7 @@ extensions, subject to their value to the core launch-and-upgrade loop.
 - Repository evidence: [milestone commits](#6-development-workflow-and-refinement) and [refinement snapshot reference](#refinement-snapshot).
 - Technical documentation and programming-pattern sources: listed below.
 - Windows release: [Release V1 ZIP](Protolaunch%20Release%20V1.zip), [archive commit `f996ea9`](https://github.com/Bannerz/COMP3016-CW1/commit/f996ea98c093ab36e3f3634c32fe3de79af0b9f6) and [launch instructions](#packaged-windows-executable).
-- Demonstration video: link to be added after recording.
+- Demonstration video: [watch on YouTube](https://youtu.be/iLoCSkvSo98).
 
 ### Technical documentation
 

@@ -7,6 +7,8 @@ upgrades to fly further and earn bigger payouts.
 The [development report](report.md) outlines proposal fulfilment, technical design,
 workflow, AI integration, testing and evaluation.
 
+[Watch the demonstration and code walkthrough](https://youtu.be/iLoCSkvSo98).
+
 ## Gameplay
 
 **Launch → collect coins → earn a payout → upgrade → fly further.**
