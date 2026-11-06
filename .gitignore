@@ -64,7 +64,7 @@ vcpkg_installed/
 *.dwo
 
 # test output & cache
-Testing/
+/Testing/
 .cache/
 
 # Local CMake/OS/editor state (shared VS Code configuration is committed)
