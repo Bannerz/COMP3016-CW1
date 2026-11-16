@@ -38,6 +38,8 @@ FetchContent_Declare(SDL_image
     GIT_REPOSITORY  https://github.com/libsdl-org/SDL_image.git
     GIT_TAG release-3.2.4
     GIT_SHALLOW TRUE
+    # The bundled stb backend does not use SDL_image's external codec submodules.
+    GIT_SUBMODULES ""
 )
 
 #build the font renderer and its bundled freetype on both platforms
